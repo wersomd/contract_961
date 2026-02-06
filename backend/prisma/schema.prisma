@@ -1,0 +1,199 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  admin
+  manager
+}
+
+enum RequestStatus {
+  draft
+  sent
+  viewed
+  code_sent
+  signed
+  expired
+  canceled
+  failed
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  logoUrl   String?  @map("logo_url")
+  timezone  String   @default("Asia/Almaty")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  users    User[]
+  clients  Client[]
+  requests Request[]
+  settings Settings?
+
+  @@map("organizations")
+}
+
+model User {
+  id             String    @id @default(uuid())
+  organizationId String    @map("organization_id")
+  email          String    @unique
+  passwordHash   String    @map("password_hash")
+  name           String
+  role           UserRole  @default(manager)
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  lastLoginAt    DateTime? @map("last_login_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  requests     Request[]
+  auditLogs    AuditLog[]
+
+  @@map("users")
+}
+
+model Client {
+  id             String   @id @default(uuid())
+  organizationId String   @map("organization_id")
+  name           String
+  phone          String   // normalized: +77070001234
+  company        String?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  requests     Request[]
+
+  @@unique([organizationId, phone])
+  @@index([phone])
+  @@map("clients")
+}
+
+model Document {
+  id             String   @id @default(uuid())
+  organizationId String   @map("organization_id")
+  name           String
+  originalPath   String   @map("original_path")
+  originalHash   String   @map("original_hash")
+  fileSizeBytes  Int      @map("file_size_bytes")
+  uploadedBy     String?  @map("uploaded_by")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  versions DocumentVersion[]
+  request  Request?
+
+  @@map("documents")
+}
+
+model DocumentVersion {
+  id          String   @id @default(uuid())
+  documentId  String   @map("document_id")
+  versionType String   @map("version_type") // 'original' | 'signed'
+  storagePath String   @map("storage_path")
+  fileHash    String   @map("file_hash")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("document_versions")
+}
+
+model Request {
+  id              String        @id @default(uuid())
+  displayId       String        @unique @map("display_id") // REQ-2026-001
+  organizationId  String        @map("organization_id")
+  clientId        String?       @map("client_id")
+  clientName      String        @map("client_name")
+  clientPhone     String        @map("client_phone")
+  documentId      String?       @unique @map("document_id")
+  documentName    String        @map("document_name")
+  status          RequestStatus @default(draft)
+  signToken       String        @unique @map("sign_token")
+  managerId       String?       @map("manager_id")
+  managerName     String?       @map("manager_name")
+  comment         String?
+  deadline        DateTime?
+  createdAt       DateTime      @default(now()) @map("created_at")
+  sentAt          DateTime?     @map("sent_at")
+  viewedAt        DateTime?     @map("viewed_at")
+  signedAt        DateTime?     @map("signed_at")
+  canceledAt      DateTime?     @map("canceled_at")
+  cancelReason    String?       @map("cancel_reason")
+  clientIp        String?       @map("client_ip")
+  clientUserAgent String?       @map("client_user_agent")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client?      @relation(fields: [clientId], references: [id])
+  document     Document?    @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  manager      User?        @relation(fields: [managerId], references: [id])
+  otpCodes     OtpCode[]
+  auditLogs    AuditLog[]
+
+  @@index([signToken])
+  @@index([status])
+  @@index([organizationId])
+  @@map("requests")
+}
+
+model OtpCode {
+  id          String    @id @default(uuid())
+  requestId   String    @map("request_id")
+  codeHash    String    @map("code_hash")
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3) @map("max_attempts")
+  expiresAt   DateTime  @map("expires_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  verifiedAt  DateTime? @map("verified_at")
+  isActive    Boolean   @default(true) @map("is_active")
+
+  request Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+  @@map("otp_codes")
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  organizationId String?  @map("organization_id")
+  userId         String?  @map("user_id")
+  userName       String?  @map("user_name")
+  action         String   // create_request, send_otp, verify_otp, signed, etc.
+  resourceType   String?  @map("resource_type")
+  resourceId     String?  @map("resource_id")
+  ipAddress      String?  @map("ip_address")
+  userAgent      String?  @map("user_agent")
+  metadata       Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  user    User?    @relation(fields: [userId], references: [id])
+  request Request? @relation(fields: [resourceId], references: [id])
+
+  @@index([organizationId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model Settings {
+  id                   String   @id @default(uuid())
+  organizationId       String   @unique @map("organization_id")
+  smsProvider          String   @default("smsc") @map("sms_provider")
+  smsApiKeyEncrypted   String?  @map("sms_api_key_encrypted")
+  smsSenderName        String   @default("961kz") @map("sms_sender_name")
+  smsLinkTemplate      String   @default("Подпишите документ: {link}") @map("sms_link_template")
+  smsCodeTemplate      String   @default("Код подтверждения: {code}") @map("sms_code_template")
+  ipWhitelistEnabled   Boolean  @default(false) @map("ip_whitelist_enabled")
+  ipWhitelist          String[] @default([]) @map("ip_whitelist")
+  auditLoggingEnabled  Boolean  @default(true) @map("audit_logging_enabled")
+  logRetentionDays     Int      @default(90) @map("log_retention_days")
+  updatedAt            DateTime @default(now()) @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("settings")
+}
