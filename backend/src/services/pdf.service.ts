@@ -30,7 +30,7 @@ function formatPhone(phone: string): string {
 }
 
 /**
- * Format date for display: 06.02.2026 в 14:30
+ * Format date for display: 06.02.2026 14:30
  */
 function formatDate(date: Date): string {
     const d = date.toLocaleDateString('ru-RU', {
@@ -68,13 +68,7 @@ function transliterate(text: string): string {
 }
 
 /**
- * Stamp PDF with signature page containing:
- * - Title
- * - Signed date/time
- * - Signer name
- * - Signer phone
- * - QR code linking to verification page
- * - Request ID
+ * Stamp PDF with compact signature block at bottom of new page
  */
 export async function stampPdf(options: StampOptions): Promise<StampResult> {
     const { originalPath, displayId, clientName, clientPhone, signedAt } = options;
@@ -83,18 +77,19 @@ export async function stampPdf(options: StampOptions): Promise<StampResult> {
     const originalBytes = await fs.readFile(originalPath);
     const pdfDoc = await PDFDocument.load(originalBytes);
 
-    // Embed font (Helvetica for Cyrillic support is limited, but works for basic text)
+    // Embed font
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
     // Add new page for stamp (A4 size)
     const pageWidth = 595;
     const pageHeight = 842;
     const stampPage = pdfDoc.addPage([pageWidth, pageHeight]);
 
-    // Generate QR code
+    // Generate smaller QR code
     const verifyUrl = `${config.publicUrl}/verify/${displayId}`;
     const qrDataUrl = await QRCode.toDataURL(verifyUrl, {
-        width: 150,
+        width: 80,
         margin: 1,
     });
 
@@ -106,80 +101,103 @@ export async function stampPdf(options: StampOptions): Promise<StampResult> {
     // Colors
     const textColor = rgb(0.2, 0.2, 0.2);
     const mutedColor = rgb(0.5, 0.5, 0.5);
-    const accentColor = rgb(0.31, 0.27, 0.9); // Primary indigo
+    const accentColor = rgb(0.31, 0.27, 0.9);
+    const borderColor = rgb(0.85, 0.85, 0.85);
 
-    // Draw content
-    let y = pageHeight - 80;
+    // Signature block position - centered with margin from top
+    const blockWidth = 400;
+    const blockHeight = 180;
+    const blockX = (pageWidth - blockWidth) / 2;
+    const blockY = pageHeight - 150; // Top margin
+
+    // Draw border rectangle
+    stampPage.drawRectangle({
+        x: blockX,
+        y: blockY - blockHeight,
+        width: blockWidth,
+        height: blockHeight,
+        borderColor: borderColor,
+        borderWidth: 1,
+    });
 
     // Title
-    stampPage.drawText('DOKUMENT PODPISANY ELEKTRONNO', {
-        x: 50,
-        y,
-        size: 18,
-        font,
+    stampPage.drawText('DOKUMENT PODPISAN ELEKTRONNO', {
+        x: blockX + 15,
+        y: blockY - 25,
+        size: 11,
+        font: fontBold,
         color: textColor,
     });
-    y -= 40;
 
-    // Divider line
+    // Divider
     stampPage.drawLine({
-        start: { x: 50, y },
-        end: { x: pageWidth - 50, y },
-        thickness: 1,
-        color: mutedColor,
+        start: { x: blockX + 15, y: blockY - 35 },
+        end: { x: blockX + blockWidth - 15, y: blockY - 35 },
+        thickness: 0.5,
+        color: borderColor,
     });
-    y -= 30;
 
-    // Signed date
-    stampPage.drawText('Podpisano:', { x: 50, y, size: 12, font, color: mutedColor });
-    stampPage.drawText(formatDate(signedAt), { x: 150, y, size: 12, font, color: textColor });
-    y -= 25;
+    // Info rows - compact
+    let infoY = blockY - 55;
+    const labelX = blockX + 15;
+    const valueX = blockX + 85;
+    const lineHeight = 18;
 
-    // Signer name
-    stampPage.drawText('Kem:', { x: 50, y, size: 12, font, color: mutedColor });
-    stampPage.drawText(transliterate(clientName), { x: 150, y, size: 12, font, color: textColor });
-    y -= 25;
+    // Date
+    stampPage.drawText('Data:', { x: labelX, y: infoY, size: 9, font, color: mutedColor });
+    stampPage.drawText(formatDate(signedAt), { x: valueX, y: infoY, size: 9, font, color: textColor });
+    infoY -= lineHeight;
+
+    // Signer
+    stampPage.drawText('Podpisano:', { x: labelX, y: infoY, size: 9, font, color: mutedColor });
+    stampPage.drawText(transliterate(clientName), { x: valueX, y: infoY, size: 9, font, color: textColor });
+    infoY -= lineHeight;
 
     // Phone
-    stampPage.drawText('Telefon:', { x: 50, y, size: 12, font, color: mutedColor });
-    stampPage.drawText(formatPhone(clientPhone), { x: 150, y, size: 12, font, color: textColor });
-    y -= 50;
+    stampPage.drawText('Telefon:', { x: labelX, y: infoY, size: 9, font, color: mutedColor });
+    stampPage.drawText(formatPhone(clientPhone), { x: valueX, y: infoY, size: 9, font, color: textColor });
+    infoY -= lineHeight;
 
-    // QR Code
+    // Request ID
+    stampPage.drawText('ID:', { x: labelX, y: infoY, size: 9, font, color: mutedColor });
+    stampPage.drawText(displayId, { x: valueX, y: infoY, size: 9, font, color: textColor });
+
+    // QR code on the right side - smaller
+    const qrSize = 70;
+    const qrX = blockX + blockWidth - qrSize - 20;
+    const qrY = blockY - 45 - qrSize;
     stampPage.drawImage(qrImage, {
-        x: 50,
-        y: y - 150,
-        width: 150,
-        height: 150,
+        x: qrX,
+        y: qrY,
+        width: qrSize,
+        height: qrSize,
     });
 
     // QR label
-    stampPage.drawText('Skaniruyte dlya proverki', {
-        x: 50,
-        y: y - 170,
-        size: 10,
+    stampPage.drawText('Proverka', {
+        x: qrX + 12,
+        y: qrY - 12,
+        size: 7,
         font,
         color: mutedColor,
     });
 
-    // Right side info
-    const infoX = 250;
-    stampPage.drawText('ID zayavki:', { x: infoX, y: y - 50, size: 12, font, color: mutedColor });
-    stampPage.drawText(displayId, { x: infoX + 80, y: y - 50, size: 12, font, color: textColor });
+    // Platform branding
+    stampPage.drawText('961.kz', {
+        x: blockX + blockWidth - 50,
+        y: blockY - blockHeight + 10,
+        size: 10,
+        font: fontBold,
+        color: accentColor,
+    });
 
-    stampPage.drawText('Platforma:', { x: infoX, y: y - 75, size: 12, font, color: mutedColor });
-    stampPage.drawText('961.kz', { x: infoX + 80, y: y - 75, size: 14, font, color: accentColor });
-
-    stampPage.drawText('URL:', { x: infoX, y: y - 100, size: 10, font, color: mutedColor });
-    stampPage.drawText(verifyUrl, { x: infoX + 30, y: y - 100, size: 9, font, color: mutedColor });
-
-    // Footer
+    // Footer at bottom of page
     stampPage.drawText(
-        'Etot dokument podpisan cherez platformu 961.kz s podtverzhdeniyem po SMS-kodu.',
+        'Dokument podpisan cherez platformu 961.kz s podtverzhdeniem po SMS-kodu.',
         {
             x: 50,
-            y: 50,
-            size: 9,
+            y: 40,
+            size: 8,
             font,
             color: mutedColor,
         }

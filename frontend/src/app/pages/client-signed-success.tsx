@@ -1,7 +1,7 @@
 import React from 'react';
 import { Card } from '@/app/components/ui/card';
 import { Button } from '@/app/components/ui/button';
-import { CheckCircle2, Download, Sparkles, PartyPopper } from 'lucide-react';
+import { CheckCircle2, Download } from 'lucide-react';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import logo from '@/assets/logo.png';
@@ -23,75 +23,53 @@ export function ClientSignedSuccessPage({ onDownload, token }: ClientSignedSucce
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+    <div className="min-h-screen bg-background">
       {/* Header */}
-      <div className="border-b border-white/10 bg-white/5 backdrop-blur-xl">
-        <div className="max-w-2xl mx-auto px-4 md:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <img src={logo} alt="961.kz" className="h-10 w-auto" />
-              <div className="hidden sm:block">
-                <p className="text-xs text-white/40">Безопасное подписание</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 text-xs text-white/40">
-              <Sparkles className="w-4 h-4 text-primary" />
-              <span className="hidden sm:inline">Защищённое соединение</span>
-            </div>
-          </div>
+      <div className="border-b border-border bg-card">
+        <div className="max-w-2xl mx-auto px-4 md:px-8 py-4 md:py-6">
+          <img src={logo} alt="961.kz" className="h-10 w-auto" />
         </div>
       </div>
 
       {/* Content */}
-      <div className="flex items-center justify-center p-4 py-12 md:py-20">
-        <Card className="w-full max-w-md p-8 md:p-10 bg-white/5 backdrop-blur-xl border-white/10">
+      <div className="flex items-center justify-center p-4 py-8 md:py-16">
+        <Card className="w-full max-w-md p-6 md:p-8">
           <div className="text-center">
-            {/* Success Animation */}
-            <div className="relative inline-block mb-8">
-              <div className="w-24 h-24 rounded-full bg-gradient-to-br from-emerald-500/30 to-emerald-500/10 flex items-center justify-center animate-pulse">
-                <CheckCircle2 className="w-12 h-12 text-emerald-400" />
-              </div>
-              <div className="absolute -top-2 -right-2 w-10 h-10 rounded-full bg-gradient-to-br from-primary/30 to-primary/10 flex items-center justify-center">
-                <PartyPopper className="w-5 h-5 text-primary" />
-              </div>
+            <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-green-50 flex items-center justify-center">
+              <CheckCircle2 className="w-10 h-10 text-green-600" />
             </div>
 
-            <h2 className="text-2xl md:text-3xl font-bold text-white mb-3">
+            <h2 className="text-2xl md:text-3xl font-semibold mb-3">
               Документ подписан!
             </h2>
 
-            <p className="text-white/50 mb-10">
-              Спасибо! Документ успешно подписан и отправлен
+            <p className="text-muted-foreground mb-8">
+              Документ успешно подписан и отправлен менеджеру
             </p>
 
             {/* Document Info */}
-            <div className="p-5 rounded-xl bg-white/5 border border-white/10 text-left mb-8 space-y-4">
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-white/50">Статус</span>
-                <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-400">
+            <div className="p-4 rounded-lg bg-muted/50 text-left mb-6 space-y-3">
+              <div className="flex justify-between items-start">
+                <span className="text-sm text-muted-foreground">Статус</span>
+                <span className="inline-flex items-center gap-1.5 text-sm font-medium text-green-600">
                   <CheckCircle2 className="w-4 h-4" />
                   Подписано
                 </span>
               </div>
-              <div className="h-px bg-white/10"></div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-white/50">Дата и время</span>
-                <span className="text-sm font-medium text-white">
+              <div className="flex justify-between items-start">
+                <span className="text-sm text-muted-foreground">Дата и время</span>
+                <span className="text-sm font-medium">
                   {format(signedDate, 'd MMMM yyyy, HH:mm', { locale: ru })}
                 </span>
               </div>
             </div>
 
-            <Button
-              onClick={handleDownload}
-              size="lg"
-              className="w-full gap-2 bg-white/10 hover:bg-white/15 text-white border border-white/20 font-semibold py-6"
-            >
-              <Download className="w-5 h-5" />
-              Скачать подписанный документ
+            <Button onClick={handleDownload} variant="outline" className="w-full gap-2 mb-4">
+              <Download className="w-4 h-4" />
+              Скачать подписанную копию
             </Button>
 
-            <p className="mt-6 text-xs text-white/40">
+            <p className="text-xs text-muted-foreground">
               Копия документа доступна для скачивания по этой ссылке
             </p>
           </div>
@@ -99,8 +77,8 @@ export function ClientSignedSuccessPage({ onDownload, token }: ClientSignedSucce
       </div>
 
       {/* Footer */}
-      <div className="text-center pb-8">
-        <p className="text-xs text-white/30">© 2026 961.kz. Электронное подписание документов</p>
+      <div className="text-center text-xs text-muted-foreground pb-8">
+        <p>© 2026 961.kz. Электронное подписание документов</p>
       </div>
     </div>
   );
