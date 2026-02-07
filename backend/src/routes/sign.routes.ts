@@ -10,11 +10,29 @@ import { stampPdf } from '../services/pdf.service.js';
 
 export const signRouter = Router();
 
-// Rate limit for OTP endpoints
-const otpLimiter = rateLimit({
+// Rate limit for sending OTP codes - stricter (SMS costs money!)
+const sendCodeLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 3, // max 3 code requests per 15 min per IP
+    message: { error: 'Слишком много запросов кода. Попробуйте через 15 минут.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+// Rate limit for verifying OTP - allow more attempts for typos
+const verifyCodeLimiter = rateLimit({
+    windowMs: 5 * 60 * 1000, // 5 minutes
+    max: 10, // max 10 verify attempts per 5 min per IP
+    message: { error: 'Слишком много попыток. Попробуйте через 5 минут.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+// General rate limit for document viewing
+const viewLimiter = rateLimit({
     windowMs: 1 * 60 * 1000, // 1 minute
-    max: 5, // 5 requests per minute per IP
-    message: { error: 'Слишком много запросов, попробуйте позже' },
+    max: 30, // 30 requests per minute
+    message: { error: 'Слишком много запросов' },
 });
 
 // GET /sign/:token - Get document info for signing
@@ -113,7 +131,7 @@ signRouter.get('/:token/document', async (req, res, next) => {
 });
 
 // POST /sign/:token/send-code - Send OTP
-signRouter.post('/:token/send-code', otpLimiter, async (req, res, next) => {
+signRouter.post('/:token/send-code', sendCodeLimiter, async (req, res, next) => {
     try {
         const { token } = req.params;
 
@@ -188,7 +206,7 @@ signRouter.post('/:token/send-code', otpLimiter, async (req, res, next) => {
 });
 
 // POST /sign/:token/verify - Verify OTP and finalize signing
-signRouter.post('/:token/verify', otpLimiter, async (req, res, next) => {
+signRouter.post('/:token/verify', verifyCodeLimiter, async (req, res, next) => {
     try {
         const { token } = req.params;
         const { code } = req.body;
@@ -199,7 +217,7 @@ signRouter.post('/:token/verify', otpLimiter, async (req, res, next) => {
 
         const request = await prisma.request.findUnique({
             where: { signToken: token },
-            include: { document: true },
+            include: { document: true, organization: true },
         });
 
         if (!request) {
@@ -283,6 +301,7 @@ signRouter.post('/:token/verify', otpLimiter, async (req, res, next) => {
                     clientName: request.clientName,
                     clientPhone: request.clientPhone,
                     signedAt: new Date(),
+                    organizationName: request.organization?.name,
                 });
                 signedPath = result.path;
                 signedHash = result.hash;

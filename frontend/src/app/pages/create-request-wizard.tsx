@@ -236,7 +236,7 @@ export function CreateRequestWizard({ onBack, onComplete }: CreateRequestWizardP
                 </Label>
                 <Input
                   id="clientName"
-                  placeholder="Иванов Иван Иванович"
+                  placeholder=""
                   value={clientName}
                   onChange={(e) => setClientName(e.target.value)}
                   className="h-12 text-lg"

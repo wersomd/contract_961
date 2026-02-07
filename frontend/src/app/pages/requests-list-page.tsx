@@ -18,17 +18,27 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/app/components/ui/select';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/app/components/ui/alert-dialog';
 import { Plus, Search, Filter, Download, MoreHorizontal, Loader2, Trash2, Eye } from 'lucide-react';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { requestsService, Request } from '@/services/requests.service';
+import { toast } from 'sonner';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/app/components/ui/dropdown-menu';
-import { useDebounce } from '@/hooks/use-debounce'; // Assuming this hook exists or I'll implement it inline
 
 interface RequestsListPageProps {
   onCreateRequest?: () => void;
@@ -43,6 +53,9 @@ export function RequestsListPage({ onCreateRequest, onViewRequest }: RequestsLis
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalRequests, setTotalRequests] = useState(0);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [requestToDelete, setRequestToDelete] = useState<Request | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   // Debounce search
   const [debouncedSearch, setDebouncedSearch] = useState(searchQuery);
@@ -72,6 +85,37 @@ export function RequestsListPage({ onCreateRequest, onViewRequest }: RequestsLis
     };
     loadRequests();
   }, [debouncedSearch, statusFilter, page]);
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const result = await requestsService.exportToExcel({
+        search: debouncedSearch,
+        status: statusFilter
+      });
+
+      if (result instanceof Blob) {
+        // Download the file
+        const url = window.URL.createObjectURL(result);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `requests_${new Date().toISOString().split('T')[0]}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        toast.success('Файл экспортирован');
+      } else {
+        // Empty result
+        toast.info('Нет заявок для экспорта (0 заявок)');
+      }
+    } catch (error) {
+      console.error('Export failed:', error);
+      toast.error('Ошибка экспорта');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const statusOptions: { value: string; label: string }[] = [
     { value: 'all', label: 'Все статусы' },
@@ -126,8 +170,17 @@ export function RequestsListPage({ onCreateRequest, onViewRequest }: RequestsLis
                 ))}
               </SelectContent>
             </Select>
-            <Button variant="outline" className="gap-2 h-10">
-              <Download className="w-4 h-4" />
+            <Button
+              variant="outline"
+              className="gap-2 h-10"
+              onClick={handleExport}
+              disabled={exporting}
+            >
+              {exporting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Download className="w-4 h-4" />
+              )}
               Экспорт
             </Button>
           </div>
@@ -206,17 +259,10 @@ export function RequestsListPage({ onCreateRequest, onViewRequest }: RequestsLis
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               className="text-destructive focus:text-destructive"
-                              onClick={async (e) => {
+                              onClick={(e) => {
                                 e.stopPropagation();
-                                if (confirm('Удалить заявку? Это действие необратимо.')) {
-                                  try {
-                                    await requestsService.deleteRequest(request.id);
-                                    setRequests(prev => prev.filter(r => r.id !== request.id));
-                                    setTotalRequests(prev => prev - 1);
-                                  } catch (err) {
-                                    console.error('Failed to delete request:', err);
-                                  }
-                                }
+                                setRequestToDelete(request);
+                                setDeleteDialogOpen(true);
                               }}
                             >
                               <Trash2 className="w-4 h-4 mr-2" />
@@ -258,6 +304,38 @@ export function RequestsListPage({ onCreateRequest, onViewRequest }: RequestsLis
           </div>
         </Card>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Удалить заявку?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Это действие необратимо. Заявка будет удалена навсегда.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={async () => {
+                if (requestToDelete) {
+                  try {
+                    await requestsService.deleteRequest(requestToDelete.id);
+                    setRequests(prev => prev.filter(r => r.id !== requestToDelete.id));
+                    setTotalRequests(prev => prev - 1);
+                  } catch (err) {
+                    console.error('Failed to delete request:', err);
+                  }
+                  setRequestToDelete(null);
+                }
+              }}
+            >
+              Удалить
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

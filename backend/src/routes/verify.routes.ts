@@ -25,25 +25,23 @@ verifyRouter.get('/:displayId', async (req, res, next) => {
             });
         }
 
-        if (request.status !== 'signed') {
-            return res.json({
-                valid: false,
-                error: 'Документ не подписан',
-            });
-        }
-
+        // Return valid for both signed and pending documents
         const signedVersion = request.document?.versions.find((v) => v.versionType === 'signed');
 
         res.json({
             valid: true,
-            documentName: request.documentName,
-            signerName: maskName(request.clientName),
-            signerPhone: maskPhone(request.clientPhone),
-            signedAt: request.signedAt,
-            requestId: request.displayId,
+            request: {
+                displayId: request.displayId,
+                documentName: request.documentName,
+                clientName: maskName(request.clientName),
+                clientPhone: maskPhone(request.clientPhone),
+                status: request.status,
+                signedAt: request.signedAt,
+                createdAt: request.createdAt,
+            },
+            documentUrl: signedVersion ? `/api/public/verify/${displayId}/document` : null,
             fileHash: signedVersion?.fileHash || null,
             originalHash: request.document?.originalHash || null,
-            documentUrl: `/api/verify/${displayId}/document`,
         });
     } catch (error) {
         next(error);

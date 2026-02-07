@@ -70,8 +70,8 @@ export function RequestTimeline({ items }: RequestTimelineProps) {
 
                         {/* Icon */}
                         <div className={`absolute left-0 top-0 bg-background rounded-full border-2 ${item.type === 'signed' ? 'border-success' :
-                                item.type === 'canceled' ? 'border-destructive' : 'border-border'
-                            } p-0.5 z-10`}>
+                            item.type === 'canceled' ? 'border-destructive' : 'border-border'
+                            } p-0.5`}>
                             {getIcon(item.type)}
                         </div>
 

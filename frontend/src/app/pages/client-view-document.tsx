@@ -79,7 +79,9 @@ export function ClientViewDocumentPage({ onSign, token }: ClientViewDocumentPage
       <div className="border-b border-border bg-card">
         <div className="max-w-4xl mx-auto px-4 md:px-8 py-4 md:py-6">
           <div className="flex items-center justify-between">
-            <img src={logo} alt="961.kz" className="h-10 w-auto" />
+            <div className="bg-[#0066FF] rounded-lg p-2">
+              <img src={logo} alt="961.kz" className="h-8 w-auto" />
+            </div>
             <span className="text-xs text-muted-foreground">Безопасное подписание</span>
           </div>
         </div>

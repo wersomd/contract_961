@@ -1,9 +1,13 @@
 import path from 'path';
 import fs from 'fs/promises';
 import crypto from 'crypto';
-import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { PDFDocument, rgb, PDFPage } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
 import QRCode from 'qrcode';
 import { config } from '../config/index.js';
+
+// Font assets directory (relative to dist/services in production)
+const FONTS_DIR = path.join(process.cwd(), 'src', 'assets', 'fonts');
 
 interface StampOptions {
     originalPath: string;
@@ -11,11 +15,40 @@ interface StampOptions {
     clientName: string;
     clientPhone: string;
     signedAt: Date;
+    organizationName?: string;
 }
 
 interface StampResult {
     path: string;
     hash: string;
+}
+
+// Cache for font bytes
+let cachedFontRegular: Uint8Array | null = null;
+let cachedFontBold: Uint8Array | null = null;
+
+// Company constants
+const COMPANY_NAME = 'ТОО "961"';
+const COMPANY_BIN = '211040031441';
+const COMPANY_PHONE = '+7 707 798 3316';
+
+/**
+ * Load font from local file (cached)
+ */
+async function loadFont(fontName: string): Promise<Uint8Array> {
+    if (fontName === 'regular' && cachedFontRegular) return cachedFontRegular;
+    if (fontName === 'bold' && cachedFontBold) return cachedFontBold;
+
+    const fontFileName = fontName === 'bold' ? 'Roboto-Bold.ttf' : 'Roboto-Regular.ttf';
+    const fontPath = path.join(FONTS_DIR, fontFileName);
+
+    const fontBytes = await fs.readFile(fontPath);
+    const fontArray = new Uint8Array(fontBytes);
+
+    if (fontName === 'regular') cachedFontRegular = fontArray;
+    if (fontName === 'bold') cachedFontBold = fontArray;
+
+    return fontArray;
 }
 
 /**
@@ -46,162 +79,223 @@ function formatDate(date: Date): string {
 }
 
 /**
- * Transliterate Cyrillic to Latin (for PDF standard fonts)
+ * Generate QR code as PNG bytes
  */
-function transliterate(text: string): string {
-    const map: Record<string, string> = {
-        'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo',
-        'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm',
-        'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u',
-        'ф': 'f', 'х': 'kh', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'sch',
-        'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya',
-        'А': 'A', 'Б': 'B', 'В': 'V', 'Г': 'G', 'Д': 'D', 'Е': 'E', 'Ё': 'Yo',
-        'Ж': 'Zh', 'З': 'Z', 'И': 'I', 'Й': 'Y', 'К': 'K', 'Л': 'L', 'М': 'M',
-        'Н': 'N', 'О': 'O', 'П': 'P', 'Р': 'R', 'С': 'S', 'Т': 'T', 'У': 'U',
-        'Ф': 'F', 'Х': 'Kh', 'Ц': 'Ts', 'Ч': 'Ch', 'Ш': 'Sh', 'Щ': 'Sch',
-        'Ъ': '', 'Ы': 'Y', 'Ь': '', 'Э': 'E', 'Ю': 'Yu', 'Я': 'Ya',
-        // Kazakh special characters
-        'ә': 'a', 'ғ': 'g', 'қ': 'q', 'ң': 'n', 'ө': 'o', 'ұ': 'u', 'ү': 'u', 'һ': 'h', 'і': 'i',
-        'Ә': 'A', 'Ғ': 'G', 'Қ': 'Q', 'Ң': 'N', 'Ө': 'O', 'Ұ': 'U', 'Ү': 'U', 'Һ': 'H', 'І': 'I',
-    };
-    return text.split('').map(char => map[char] || char).join('');
+async function generateQRCode(data: string, size: number = 80): Promise<Uint8Array> {
+    const qrDataUrl = await QRCode.toDataURL(data, {
+        width: size,
+        margin: 1,
+    });
+    const qrBase64 = qrDataUrl.split(',')[1];
+    return Buffer.from(qrBase64, 'base64');
 }
 
 /**
- * Stamp PDF with compact signature block at bottom of new page
+ * Stamp PDF with signature block at bottom of first page
  */
 export async function stampPdf(options: StampOptions): Promise<StampResult> {
-    const { originalPath, displayId, clientName, clientPhone, signedAt } = options;
+    const { originalPath, displayId, clientName, clientPhone, signedAt, organizationName } = options;
 
     // Load original PDF
     const originalBytes = await fs.readFile(originalPath);
     const pdfDoc = await PDFDocument.load(originalBytes);
 
-    // Embed font
-    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    // Register fontkit for custom fonts
+    pdfDoc.registerFontkit(fontkit);
 
-    // Add new page for stamp (A4 size)
-    const pageWidth = 595;
-    const pageHeight = 842;
-    const stampPage = pdfDoc.addPage([pageWidth, pageHeight]);
+    // Load and embed fonts from local files
+    const fontRegularBytes = await loadFont('regular');
+    const fontBoldBytes = await loadFont('bold');
 
-    // Generate smaller QR code
+    const font = await pdfDoc.embedFont(fontRegularBytes);
+    const fontBold = await pdfDoc.embedFont(fontBoldBytes);
+
+    // Get first page or create new page if needed
+    const pages = pdfDoc.getPages();
+    let targetPage: PDFPage;
+    let startY: number;
+
+    const signatureBlockHeight = 280;
+
+    if (pages.length > 0) {
+        targetPage = pages[0];
+        startY = 50 + signatureBlockHeight;
+    } else {
+        targetPage = pdfDoc.addPage([595, 842]);
+        startY = 842 - 50;
+    }
+
+    const { width: pageWidth } = targetPage.getSize();
+
+    // Verify URL for main QR
     const verifyUrl = `${config.publicUrl}/verify/${displayId}`;
-    const qrDataUrl = await QRCode.toDataURL(verifyUrl, {
-        width: 80,
-        margin: 1,
-    });
+    const signedDocUrl = `${config.publicUrl}/download/${displayId}`;
 
-    // Convert data URL to bytes
-    const qrBase64 = qrDataUrl.split(',')[1];
-    const qrBytes = Buffer.from(qrBase64, 'base64');
-    const qrImage = await pdfDoc.embedPng(qrBytes);
+    // Generate QR codes
+    const mainQrBytes = await generateQRCode(verifyUrl, 100);
+    const companyQrBytes = await generateQRCode(COMPANY_BIN, 70);
+    const clientQrBytes = await generateQRCode(clientPhone, 70);
+
+    const mainQrImage = await pdfDoc.embedPng(mainQrBytes);
+    const companyQrImage = await pdfDoc.embedPng(companyQrBytes);
+    const clientQrImage = await pdfDoc.embedPng(clientQrBytes);
 
     // Colors
     const textColor = rgb(0.2, 0.2, 0.2);
     const mutedColor = rgb(0.5, 0.5, 0.5);
     const accentColor = rgb(0.31, 0.27, 0.9);
+    const linkColor = rgb(0.0, 0.4, 0.8);
     const borderColor = rgb(0.85, 0.85, 0.85);
 
-    // Signature block position - centered with margin from top
-    const blockWidth = 400;
-    const blockHeight = 180;
-    const blockX = (pageWidth - blockWidth) / 2;
-    const blockY = pageHeight - 150; // Top margin
+    // ============================================
+    // SECTION 1: Main info with QR (top of block)
+    // ============================================
+    let y = startY;
+    const marginX = 50;
+    const contentWidth = pageWidth - marginX * 2;
 
-    // Draw border rectangle
-    stampPage.drawRectangle({
-        x: blockX,
-        y: blockY - blockHeight,
-        width: blockWidth,
-        height: blockHeight,
-        borderColor: borderColor,
-        borderWidth: 1,
+    // Horizontal divider line
+    targetPage.drawLine({
+        start: { x: marginX, y },
+        end: { x: pageWidth - marginX, y },
+        thickness: 1,
+        color: borderColor,
+    });
+    y -= 15;
+
+    // Main QR on left
+    const mainQrSize = 80;
+    targetPage.drawImage(mainQrImage, {
+        x: marginX,
+        y: y - mainQrSize,
+        width: mainQrSize,
+        height: mainQrSize,
     });
 
-    // Title
-    stampPage.drawText('DOKUMENT PODPISAN ELEKTRONNO', {
-        x: blockX + 15,
-        y: blockY - 25,
-        size: 11,
-        font: fontBold,
+    // Text next to main QR
+    const textX = marginX + mainQrSize + 15;
+    let textY = y - 12;
+
+    targetPage.drawText('Этот документ был подписан через систему Contract 961.', {
+        x: textX,
+        y: textY,
+        size: 9,
+        font,
+        color: textColor,
+    });
+    textY -= 14;
+
+    targetPage.drawText('Для проверки подлинности электронного документа', {
+        x: textX,
+        y: textY,
+        size: 9,
+        font,
+        color: textColor,
+    });
+    textY -= 14;
+
+    targetPage.drawText('перейдите по ссылке:', {
+        x: textX,
+        y: textY,
+        size: 9,
+        font,
         color: textColor,
     });
 
-    // Divider
-    stampPage.drawLine({
-        start: { x: blockX + 15, y: blockY - 35 },
-        end: { x: blockX + blockWidth - 15, y: blockY - 35 },
+    targetPage.drawText(verifyUrl, {
+        x: textX + 95,
+        y: textY,
+        size: 9,
+        font,
+        color: linkColor,
+    });
+    textY -= 20;
+
+    // Info row: Sender, Receiver, Status
+    targetPage.drawText('Отправитель:', { x: textX, y: textY, size: 8, font, color: mutedColor });
+    targetPage.drawText(organizationName || COMPANY_NAME, { x: textX + 70, y: textY, size: 8, font, color: textColor });
+    textY -= 12;
+
+    targetPage.drawText('Получатель:', { x: textX, y: textY, size: 8, font, color: mutedColor });
+    targetPage.drawText(clientName, { x: textX + 70, y: textY, size: 8, font, color: textColor });
+    textY -= 12;
+
+    targetPage.drawText('Статус:', { x: textX, y: textY, size: 8, font, color: mutedColor });
+    targetPage.drawText('Подписан', { x: textX + 70, y: textY, size: 8, font: fontBold, color: rgb(0.1, 0.6, 0.3) });
+
+    y -= mainQrSize + 45; // Extra spacing before next section
+
+    // ============================================
+    // SECTION 2: Two QR codes side by side
+    // ============================================
+
+    targetPage.drawLine({
+        start: { x: marginX, y },
+        end: { x: pageWidth - marginX, y },
         thickness: 0.5,
         color: borderColor,
     });
+    y -= 15;
 
-    // Info rows - compact
-    let infoY = blockY - 55;
-    const labelX = blockX + 15;
-    const valueX = blockX + 85;
-    const lineHeight = 18;
+    const qrSize = 60;
+    const columnWidth = (contentWidth - 30) / 2;
 
-    // Date
-    stampPage.drawText('Data:', { x: labelX, y: infoY, size: 9, font, color: mutedColor });
-    stampPage.drawText(formatDate(signedAt), { x: valueX, y: infoY, size: 9, font, color: textColor });
-    infoY -= lineHeight;
-
-    // Signer
-    stampPage.drawText('Podpisano:', { x: labelX, y: infoY, size: 9, font, color: mutedColor });
-    stampPage.drawText(transliterate(clientName), { x: valueX, y: infoY, size: 9, font, color: textColor });
-    infoY -= lineHeight;
-
-    // Phone
-    stampPage.drawText('Telefon:', { x: labelX, y: infoY, size: 9, font, color: mutedColor });
-    stampPage.drawText(formatPhone(clientPhone), { x: valueX, y: infoY, size: 9, font, color: textColor });
-    infoY -= lineHeight;
-
-    // Request ID
-    stampPage.drawText('ID:', { x: labelX, y: infoY, size: 9, font, color: mutedColor });
-    stampPage.drawText(displayId, { x: valueX, y: infoY, size: 9, font, color: textColor });
-
-    // QR code on the right side - smaller
-    const qrSize = 70;
-    const qrX = blockX + blockWidth - qrSize - 20;
-    const qrY = blockY - 45 - qrSize;
-    stampPage.drawImage(qrImage, {
-        x: qrX,
-        y: qrY,
+    // LEFT COLUMN: Company QR
+    const leftX = marginX;
+    targetPage.drawImage(companyQrImage, {
+        x: leftX,
+        y: y - qrSize,
         width: qrSize,
         height: qrSize,
     });
 
-    // QR label
-    stampPage.drawText('Proverka', {
-        x: qrX + 12,
-        y: qrY - 12,
+    let leftTextX = leftX + qrSize + 10;
+    let leftTextY = y - 12;
+
+    targetPage.drawText(COMPANY_NAME, { x: leftTextX, y: leftTextY, size: 10, font: fontBold, color: textColor });
+    leftTextY -= 14;
+    targetPage.drawText(`БИН: ${COMPANY_BIN}`, { x: leftTextX, y: leftTextY, size: 9, font, color: textColor });
+    leftTextY -= 12;
+    targetPage.drawText(COMPANY_PHONE, { x: leftTextX, y: leftTextY, size: 9, font, color: textColor });
+    leftTextY -= 12;
+    targetPage.drawText(`Дата подписи: ${formatDate(signedAt)}`, { x: leftTextX, y: leftTextY, size: 8, font, color: mutedColor });
+
+    // RIGHT COLUMN: Client QR
+    const rightX = marginX + columnWidth + 30;
+    targetPage.drawImage(clientQrImage, {
+        x: rightX,
+        y: y - qrSize,
+        width: qrSize,
+        height: qrSize,
+    });
+
+    let rightTextX = rightX + qrSize + 10;
+    let rightTextY = y - 12;
+
+    targetPage.drawText(clientName, { x: rightTextX, y: rightTextY, size: 10, font: fontBold, color: textColor });
+    rightTextY -= 14;
+    targetPage.drawText(formatPhone(clientPhone), { x: rightTextX, y: rightTextY, size: 9, font, color: textColor });
+    rightTextY -= 12;
+    targetPage.drawText(`Дата подписи: ${formatDate(signedAt)}`, { x: rightTextX, y: rightTextY, size: 8, font, color: mutedColor });
+
+    y -= qrSize + 25;
+
+    // Footer
+    targetPage.drawLine({
+        start: { x: marginX, y },
+        end: { x: pageWidth - marginX, y },
+        thickness: 0.5,
+        color: borderColor,
+    });
+    y -= 12;
+
+    targetPage.drawText(`ID: ${displayId}  |  Платформа: 961.kz  |  Подписано электронно с SMS-подтверждением`, {
+        x: marginX,
+        y,
         size: 7,
         font,
         color: mutedColor,
     });
-
-    // Platform branding
-    stampPage.drawText('961.kz', {
-        x: blockX + blockWidth - 50,
-        y: blockY - blockHeight + 10,
-        size: 10,
-        font: fontBold,
-        color: accentColor,
-    });
-
-    // Footer at bottom of page
-    stampPage.drawText(
-        'Dokument podpisan cherez platformu 961.kz s podtverzhdeniem po SMS-kodu.',
-        {
-            x: 50,
-            y: 40,
-            size: 8,
-            font,
-            color: mutedColor,
-        }
-    );
 
     // Save PDF
     const stampedBytes = await pdfDoc.save();

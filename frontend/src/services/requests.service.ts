@@ -53,6 +53,32 @@ export const requestsService = {
 
     deleteRequest: (id: string) =>
         apiClient.delete<{ success: boolean }>(`/requests/${id}`),
+
+    exportToExcel: async (params?: { search?: string; status?: string }): Promise<{ empty: boolean } | Blob> => {
+        const queryParams = new URLSearchParams();
+        if (params?.search) queryParams.append('search', params.search);
+        if (params?.status && params.status !== 'all') queryParams.append('status', params.status);
+
+        const token = localStorage.getItem('token');
+        const response = await fetch(
+            `${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/requests/export?${queryParams.toString()}`,
+            {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                },
+            }
+        );
+
+        const contentType = response.headers.get('content-type');
+        if (contentType?.includes('application/json')) {
+            // Empty result
+            return response.json();
+        }
+
+        // Excel file
+        return response.blob();
+    },
 };
 
 export const dashboardService = {

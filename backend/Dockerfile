@@ -15,6 +15,9 @@ COPY prisma ./prisma
 COPY src ./src
 COPY tsconfig.json ./
 
+# Copy font files
+COPY src/assets ./src/assets
+
 # Generate Prisma client
 RUN npx prisma generate
 
@@ -39,6 +42,7 @@ RUN adduser --system --uid 1001 nodejs
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/src/assets ./src/assets
 COPY package*.json ./
 
 # Create uploads directory

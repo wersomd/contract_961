@@ -20,6 +20,7 @@ import { AuditLogPage } from '@/app/pages/audit-log-page';
 import { ClientViewDocumentPage } from '@/app/pages/client-view-document';
 import { ClientEnterCodePage } from '@/app/pages/client-enter-code';
 import { ClientSignedSuccessPage } from '@/app/pages/client-signed-success';
+import { VerifyPage } from '@/app/pages/verify-page';
 
 type Page =
   | 'login'
@@ -33,7 +34,8 @@ type Page =
   | 'audit'
   | 'client-view'
   | 'client-code'
-  | 'client-success';
+  | 'client-success'
+  | 'verify';
 
 function AppContent() {
   const { user, isLoading, login, logout } = useAuth();
@@ -42,13 +44,17 @@ function AppContent() {
   const [selectedRequestId, setSelectedRequestId] = React.useState<string>('');
   const [clientToken, setClientToken] = React.useState<string | null>(null);
 
-  // Check if this is a client signing URL: /client/:token
+  // Check if this is a client signing URL: /client/:token or verify URL: /verify/:displayId
   React.useEffect(() => {
     const path = window.location.pathname;
     const clientMatch = path.match(/^\/client\/([a-zA-Z0-9-]+)/);
+    const verifyMatch = path.match(/^\/verify\/([A-Z]{3}-\d{4}-\d{3})/);
     if (clientMatch) {
       setClientToken(clientMatch[1]);
       setCurrentPage('client-view');
+    } else if (verifyMatch) {
+      setClientToken(verifyMatch[1]); // Use clientToken to store displayId
+      setCurrentPage('verify');
     }
   }, []);
 
@@ -131,6 +137,16 @@ function AppContent() {
           </>
         );
     }
+  }
+
+  // Verify page (public)
+  if (currentPage === 'verify') {
+    return (
+      <>
+        <VerifyPage displayId={clientToken || undefined} />
+        <Toaster />
+      </>
+    );
   }
 
   // Admin pages

@@ -1,0 +1,468 @@
+openapi: '3.0.0'
+info:
+  title: Contract 961.kz API
+  description: |
+    API документация для системы электронного подписания документов Contract 961.kz
+    
+    ## Аутентификация
+    Большинство эндпоинтов требуют JWT токен в заголовке Authorization:
+    ```
+    Authorization: Bearer <token>
+    ```
+    
+    ## Rate Limiting
+    - Общий лимит: 100 запросов/минуту
+    - OTP отправка: 3 запроса/15 минут
+    - OTP верификация: 10 запросов/5 минут
+  version: '1.0.0'
+  contact:
+    name: Contract 961.kz
+    email: support@961.kz
+
+servers:
+  - url: http://localhost:3000
+    description: Development
+  - url: https://api.961.kz
+    description: Production
+
+tags:
+  - name: Auth
+    description: Аутентификация пользователей
+  - name: Requests
+    description: Управление заявками на подписание
+  - name: Clients
+    description: Управление клиентами
+  - name: Dashboard
+    description: Дашборд и статистика
+  - name: Public Sign
+    description: Публичный флоу подписания (для клиентов)
+  - name: Public Verify
+    description: Публичная верификация документов
+
+paths:
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Вход в систему
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 6
+      responses:
+        '200':
+          description: Успешная аутентификация
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                  user:
+                    $ref: '#/components/schemas/User'
+        '401':
+          description: Неверные учетные данные
+
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: Получить текущего пользователя
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Данные пользователя
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+  /api/requests:
+    get:
+      tags: [Requests]
+      summary: Получить список заявок
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, sent, viewed, code_sent, signed, rejected]
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Список заявок
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requests:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Request'
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  totalPages:
+                    type: integer
+
+    post:
+      tags: [Requests]
+      summary: Создать новую заявку
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [clientName, clientPhone, documentName, file]
+              properties:
+                clientName:
+                  type: string
+                clientPhone:
+                  type: string
+                clientEmail:
+                  type: string
+                  format: email
+                documentName:
+                  type: string
+                notes:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Заявка создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Request'
+
+  /api/requests/{id}:
+    get:
+      tags: [Requests]
+      summary: Получить заявку по ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Детали заявки
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestDetail'
+
+    delete:
+      tags: [Requests]
+      summary: Удалить заявку
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Заявка удалена
+
+  /api/requests/{id}/send:
+    post:
+      tags: [Requests]
+      summary: Отправить заявку клиенту
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Заявка отправлена
+
+  /api/requests/export:
+    get:
+      tags: [Requests]
+      summary: Экспорт заявок в Excel
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Excel файл
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+            application/json:
+              schema:
+                type: object
+                properties:
+                  empty:
+                    type: boolean
+
+  /api/dashboard/stats:
+    get:
+      tags: [Dashboard]
+      summary: Статистика дашборда
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Статистика
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalRequests:
+                    type: integer
+                  signedCount:
+                    type: integer
+                  pendingCount:
+                    type: integer
+                  todayCount:
+                    type: integer
+
+  /sign/{token}:
+    get:
+      tags: [Public Sign]
+      summary: Получить информацию о документе для подписания
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Информация о документе
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  documentName:
+                    type: string
+                  clientName:
+                    type: string
+                  status:
+                    type: string
+        '404':
+          description: Ссылка недействительна
+
+  /sign/{token}/send-code:
+    post:
+      tags: [Public Sign]
+      summary: Отправить OTP код
+      description: Лимит 3 запроса на 15 минут
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Код отправлен
+        '429':
+          description: Слишком много запросов
+
+  /sign/{token}/verify:
+    post:
+      tags: [Public Sign]
+      summary: Верифицировать OTP и подписать
+      description: Лимит 10 запросов на 5 минут
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: string
+                  pattern: '^\d{4}$'
+      responses:
+        '200':
+          description: Документ подписан
+        '400':
+          description: Неверный код
+        '429':
+          description: Слишком много попыток
+
+  /api/public/verify/{displayId}:
+    get:
+      tags: [Public Verify]
+      summary: Проверить подлинность документа
+      parameters:
+        - name: displayId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Z]{3}-\d{4}-\d{3}$'
+            example: REQ-2026-001
+      responses:
+        '200':
+          description: Результат проверки
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    properties:
+                      valid:
+                        type: boolean
+                        enum: [true]
+                      request:
+                        type: object
+                        properties:
+                          displayId:
+                            type: string
+                          documentName:
+                            type: string
+                          clientName:
+                            type: string
+                          status:
+                            type: string
+                          signedAt:
+                            type: string
+                            format: date-time
+                            nullable: true
+                          createdAt:
+                            type: string
+                            format: date-time
+                  - type: object
+                    properties:
+                      valid:
+                        type: boolean
+                        enum: [false]
+                      error:
+                        type: string
+
+  /api/public/verify/{displayId}/document:
+    get:
+      tags: [Public Verify]
+      summary: Скачать подписанный документ
+      parameters:
+        - name: displayId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: PDF документ
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Документ не найден
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+          enum: [admin, manager]
+
+    Request:
+      type: object
+      properties:
+        id:
+          type: string
+        displayId:
+          type: string
+        documentName:
+          type: string
+        clientName:
+          type: string
+        clientPhone:
+          type: string
+        status:
+          type: string
+          enum: [draft, sent, viewed, code_sent, signed, rejected]
+        createdAt:
+          type: string
+          format: date-time
+        signedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    RequestDetail:
+      allOf:
+        - $ref: '#/components/schemas/Request'
+        - type: object
+          properties:
+            signUrl:
+              type: string
+            document:
+              type: object
+              properties:
+                id:
+                  type: string
+                originalHash:
+                  type: string

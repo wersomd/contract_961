@@ -17,16 +17,14 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/app/components/ui/sheet';
-import { Plus, Search, Building2, Phone, FileText, Loader2, Calendar, Clock } from 'lucide-react';
+import { Search, Building2, Phone, FileText, Loader2, Calendar, Clock } from 'lucide-react';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { AddClientDialog } from '@/app/components/add-client-dialog';
 import { clientsService, Client, ClientDetails } from '@/services/clients.service';
 import { useDebounce } from '@/hooks/use-debounce';
 import { StatusBadge } from '@/app/components/status-badge';
 
 export function ClientsPage() {
-  const [showAddDialog, setShowAddDialog] = useState(false);
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -83,10 +81,6 @@ export function ClientsPage() {
     }
   }, [selectedClientId]);
 
-  const handleClientAdded = () => {
-    loadClients();
-  };
-
   return (
     <div className="h-full overflow-auto">
       {/* Header */}
@@ -99,10 +93,6 @@ export function ClientsPage() {
                 База клиентов и история подписаний
               </p>
             </div>
-            <Button className="gap-2" onClick={() => setShowAddDialog(true)}>
-              <Plus className="w-4 h-4" />
-              Добавить клиента
-            </Button>
           </div>
 
           <div className="relative max-w-md">
@@ -223,13 +213,6 @@ export function ClientsPage() {
           </div>
         </Card>
       </div>
-
-      {/* Add Client Dialog */}
-      <AddClientDialog
-        open={showAddDialog}
-        onOpenChange={setShowAddDialog}
-        onClientAdded={handleClientAdded}
-      />
 
       {/* Client Details Sheet */}
       <Sheet open={!!selectedClientId} onOpenChange={(open) => !open && setSelectedClientId(null)}>

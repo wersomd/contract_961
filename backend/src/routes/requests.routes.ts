@@ -75,6 +75,108 @@ async function calculateFileHash(filePath: string): Promise<string> {
     return crypto.createHash('sha256').update(content).digest('hex');
 }
 
+// Status labels for export
+const statusLabels: Record<string, string> = {
+    sent: 'Отправлено',
+    viewed: 'Просмотрено',
+    code_sent: 'Код отправлен',
+    signed: 'Подписано',
+    rejected: 'Отклонено',
+    expired: 'Истекло',
+    canceled: 'Отменено',
+};
+
+// GET /api/requests/export - Excel export
+requestsRouter.get('/export', async (req: AuthRequest, res, next) => {
+    try {
+        const { search, status } = req.query;
+
+        const where: any = { organizationId: req.user!.organizationId };
+
+        if (status && status !== 'all') {
+            where.status = status;
+        }
+
+        if (search) {
+            where.OR = [
+                { displayId: { contains: search as string, mode: 'insensitive' } },
+                { clientName: { contains: search as string, mode: 'insensitive' } },
+                { documentName: { contains: search as string, mode: 'insensitive' } },
+            ];
+        }
+
+        const requests = await prisma.request.findMany({
+            where,
+            orderBy: { createdAt: 'desc' },
+            select: {
+                displayId: true,
+                clientName: true,
+                clientPhone: true,
+                documentName: true,
+                status: true,
+                createdAt: true,
+                signedAt: true,
+                managerName: true,
+            },
+        });
+
+        // Return empty indicator for frontend
+        if (requests.length === 0) {
+            return res.json({ empty: true, count: 0 });
+        }
+
+        // Import ExcelJS
+        const ExcelJS = require('exceljs');
+        const workbook = new ExcelJS.Workbook();
+        const worksheet = workbook.addWorksheet('Заявки');
+
+        // Set columns
+        worksheet.columns = [
+            { header: '№ Заявки', key: 'displayId', width: 15 },
+            { header: 'Клиент', key: 'clientName', width: 25 },
+            { header: 'Телефон', key: 'clientPhone', width: 18 },
+            { header: 'Документ', key: 'documentName', width: 30 },
+            { header: 'Статус', key: 'status', width: 15 },
+            { header: 'Дата создания', key: 'createdAt', width: 18 },
+            { header: 'Дата подписания', key: 'signedAt', width: 18 },
+            { header: 'Менеджер', key: 'managerName', width: 20 },
+        ];
+
+        // Style header row
+        worksheet.getRow(1).font = { bold: true };
+        worksheet.getRow(1).fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFE0E0E0' },
+        };
+
+        // Add data
+        requests.forEach((req) => {
+            worksheet.addRow({
+                displayId: req.displayId,
+                clientName: req.clientName,
+                clientPhone: req.clientPhone,
+                documentName: req.documentName,
+                status: statusLabels[req.status] || req.status,
+                createdAt: req.createdAt ? new Date(req.createdAt).toLocaleString('ru-RU') : '',
+                signedAt: req.signedAt ? new Date(req.signedAt).toLocaleString('ru-RU') : '',
+                managerName: req.managerName || '',
+            });
+        });
+
+        // Set response headers
+        const filename = `requests_${new Date().toISOString().split('T')[0]}.xlsx`;
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+        // Write to response
+        await workbook.xlsx.write(res);
+        res.end();
+    } catch (error) {
+        next(error);
+    }
+});
+
 // GET /api/requests
 requestsRouter.get('/', async (req: AuthRequest, res, next) => {
     try {

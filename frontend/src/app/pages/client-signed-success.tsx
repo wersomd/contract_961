@@ -27,7 +27,9 @@ export function ClientSignedSuccessPage({ onDownload, token }: ClientSignedSucce
       {/* Header */}
       <div className="border-b border-border bg-card">
         <div className="max-w-2xl mx-auto px-4 md:px-8 py-4 md:py-6">
-          <img src={logo} alt="961.kz" className="h-10 w-auto" />
+          <div className="bg-[#0066FF] rounded-lg p-2">
+            <img src={logo} alt="961.kz" className="h-8 w-auto" />
+          </div>
         </div>
       </div>
 

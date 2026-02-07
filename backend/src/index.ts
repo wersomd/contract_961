@@ -57,6 +57,7 @@ app.use('/api/settings', settingsRouter);
 // Public Routes (for signing flow)
 app.use('/sign', signRouter);
 app.use('/verify', verifyRouter);
+app.use('/api/public/verify', verifyRouter); // Public API for frontend verify page
 
 // Error handler
 app.use(errorHandler);
