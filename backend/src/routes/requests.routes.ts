@@ -11,6 +11,7 @@ import { config } from '../config/index.js';
 import { AppError } from '../middleware/error-handler.js';
 import { createAuditLog, maskPhone } from '../services/audit.service.js';
 import { smsProvider } from '../services/sms.service.js';
+import { uploadToS3, serveFile, deleteFromS3, isS3Path } from '../services/storage.service.js';
 
 export const requestsRouter = Router();
 
@@ -245,19 +246,28 @@ requestsRouter.post('/', upload.single('documentFile'), async (req: AuthRequest,
         const signToken = uuidv4();
         const fileHash = await calculateFileHash(req.file.path);
 
+        // Upload to S3 if enabled
+        let storagePath = req.file.path;
+        if (config.s3.enabled) {
+            const s3Key = `documents/${path.basename(req.file.path)}`;
+            storagePath = await uploadToS3(req.file.path, s3Key);
+            // Remove local copy — S3 is the source of truth
+            await import('fs/promises').then(fs => fs.unlink(req.file!.path)).catch(() => { });
+        }
+
         // Create document record
         const document = await prisma.document.create({
             data: {
                 organizationId: req.user!.organizationId,
                 name: documentName,
-                originalPath: req.file.path,
+                originalPath: storagePath,
                 originalHash: fileHash,
                 fileSizeBytes: req.file.size,
                 uploadedBy: req.user!.id,
                 versions: {
                     create: {
                         versionType: 'original',
-                        storagePath: req.file.path,
+                        storagePath: storagePath,
                         fileHash,
                     },
                 },
@@ -504,10 +514,7 @@ requestsRouter.get('/:id/document', async (req: AuthRequest, res, next) => {
             throw new AppError(404, 'Документ не найден');
         }
 
-        const encodedFilename = encodeURIComponent(`${request.documentName}.pdf`);
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodedFilename}`);
-        res.sendFile(request.document.originalPath);
+        await serveFile(res, request.document.originalPath, `${request.documentName}.pdf`);
     } catch (error) {
         next(error);
     }
@@ -530,10 +537,7 @@ requestsRouter.get('/:id/signed-document', async (req: AuthRequest, res, next) =
             throw new AppError(404, 'Подписанный документ не найден');
         }
 
-        const encodedFilename = encodeURIComponent(`${request.documentName}_signed.pdf`);
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodedFilename}`);
-        res.sendFile(signedVersion.storagePath);
+        await serveFile(res, signedVersion.storagePath, `${request.documentName}_signed.pdf`, 'attachment');
     } catch (error) {
         next(error);
     }
@@ -562,11 +566,15 @@ requestsRouter.delete('/:id', async (req: AuthRequest, res, next) => {
             throw new AppError(404, 'Заявка не найдена');
         }
 
-        // Delete files from disk
+        // Delete files from storage
         if (request.document) {
             for (const version of request.document.versions) {
                 try {
-                    await fs.unlink(version.storagePath);
+                    if (isS3Path(version.storagePath)) {
+                        await deleteFromS3(version.storagePath);
+                    } else {
+                        await fs.unlink(version.storagePath);
+                    }
                 } catch {
                     // File may not exist
                 }

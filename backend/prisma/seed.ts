@@ -1,5 +1,11 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
+import dotenv from 'dotenv';
+
+// Load env from project root
+dotenv.config({ path: '../.env' });
+dotenv.config(); // Also try current directory
 
 const prisma = new PrismaClient();
 
@@ -18,11 +24,19 @@ async function main() {
     });
     console.log('✅ Organization created:', org.name);
 
-    // Create admin user
-    const adminPassword = await bcrypt.hash('admin123', 12);
+    // Read admin password from env or generate a secure one
+    let adminPasswordRaw = process.env.ADMIN_PASSWORD;
+    let generated = false;
+
+    if (!adminPasswordRaw) {
+        adminPasswordRaw = crypto.randomBytes(16).toString('base64url').slice(0, 20);
+        generated = true;
+    }
+
+    const adminPassword = await bcrypt.hash(adminPasswordRaw, 12);
     await prisma.user.upsert({
         where: { email: 'admin@961.kz' },
-        update: {},
+        update: { passwordHash: adminPassword },
         create: {
             organizationId: org.id,
             email: 'admin@961.kz',
@@ -48,7 +62,12 @@ async function main() {
     console.log('🎉 Seeding complete!');
     console.log('');
     console.log('📧 Login: admin@961.kz');
-    console.log('🔑 Password: admin123');
+    if (generated) {
+        console.log(`🔑 Generated password: ${adminPasswordRaw}`);
+        console.log('⚠️  Save this password! Add ADMIN_PASSWORD to your .env file.');
+    } else {
+        console.log('🔑 Password: (from ADMIN_PASSWORD env variable)');
+    }
 }
 
 main()
@@ -59,3 +78,4 @@ main()
     .finally(async () => {
         await prisma.$disconnect();
     });
+

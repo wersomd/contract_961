@@ -3,6 +3,13 @@ import path from 'path';
 
 dotenv.config();
 
+const isProduction = process.env.NODE_ENV === 'production';
+
+// Validate critical env vars in production
+if (isProduction && (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'change-me-in-production')) {
+    throw new Error('JWT_SECRET must be set in production! Generate one with: node -e "console.log(require(\'crypto\').randomBytes(64).toString(\'hex\'))"');
+}
+
 export const config = {
     nodeEnv: process.env.NODE_ENV || 'development',
     port: parseInt(process.env.PORT || '3000', 10),
@@ -11,7 +18,7 @@ export const config = {
     databaseUrl: process.env.DATABASE_URL!,
 
     // JWT
-    jwtSecret: process.env.JWT_SECRET || 'change-me-in-production',
+    jwtSecret: process.env.JWT_SECRET || 'dev-only-secret-change-in-production',
     jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
 
     // SMSC.kz
@@ -37,4 +44,14 @@ export const config = {
         maxAttempts: 3,
         cooldownSeconds: 60,
     },
+
+    // AWS S3
+    s3: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+        region: process.env.AWS_REGION || 'us-east-1',
+        bucket: process.env.AWS_S3_BUCKET || '',
+        enabled: !!(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_S3_BUCKET),
+    },
 };
+

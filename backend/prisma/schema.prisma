@@ -127,6 +127,7 @@ model Request {
   cancelReason    String?       @map("cancel_reason")
   clientIp        String?       @map("client_ip")
   clientUserAgent String?       @map("client_user_agent")
+  verifyToken     String?       @unique @map("verify_token") // Secure token for public verification
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   client       Client?      @relation(fields: [clientId], references: [id])

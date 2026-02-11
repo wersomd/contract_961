@@ -29,9 +29,9 @@ export function LoginPage({ onLogin, onForgotPassword }: LoginPageProps) {
       onLogin?.(response.token, response.user);
     } catch (err: any) {
       console.error('Login error:', err);
-      // Try to extract message from various common API error structures
+      // Extract error message from our ApiError structure
       const message =
-        err?.response?.data?.message ||
+        err?.data?.error ||
         err?.data?.message ||
         err?.message ||
         'Неверный email или пароль';

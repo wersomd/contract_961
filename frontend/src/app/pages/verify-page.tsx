@@ -7,7 +7,7 @@ import { ru } from 'date-fns/locale';
 import logo from '@/assets/logo.png';
 
 interface VerifyPageProps {
-    displayId?: string;
+    token?: string;
 }
 
 interface VerifyResult {
@@ -23,18 +23,18 @@ interface VerifyResult {
     error?: string;
 }
 
-export function VerifyPage({ displayId }: VerifyPageProps) {
+export function VerifyPage({ token }: VerifyPageProps) {
     const [loading, setLoading] = useState(true);
     const [result, setResult] = useState<VerifyResult | null>(null);
 
     useEffect(() => {
-        if (!displayId) {
-            setResult({ valid: false, error: 'Неверный идентификатор заявки' });
+        if (!token) {
+            setResult({ valid: false, error: 'Неверный токен верификации' });
             setLoading(false);
             return;
         }
 
-        fetch(`/api/public/verify/${displayId}`)
+        fetch(`/api/public/verify/${token}`)
             .then(res => res.json())
             .then(data => {
                 setResult(data);
@@ -43,7 +43,7 @@ export function VerifyPage({ displayId }: VerifyPageProps) {
                 setResult({ valid: false, error: 'Ошибка проверки документа' });
             })
             .finally(() => setLoading(false));
-    }, [displayId]);
+    }, [token]);
 
     const getStatusBadge = (status: string) => {
         switch (status) {
@@ -181,7 +181,7 @@ export function VerifyPage({ displayId }: VerifyPageProps) {
                                 <div className="mt-6 pt-6 border-t border-gray-200">
                                     <Button
                                         className="gap-2"
-                                        onClick={() => window.open(`/api/public/verify/${displayId}/document`, '_blank')}
+                                        onClick={() => window.open(`/api/public/verify/${token}/document`, '_blank')}
                                     >
                                         <Download className="w-4 h-4" />
                                         Скачать подписанный документ

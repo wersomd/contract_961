@@ -1,16 +1,28 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { maskPhone, maskName } from '../services/audit.service.js';
+import { serveFile } from '../services/storage.service.js';
 
 export const verifyRouter = Router();
 
-// GET /verify/:displayId - Public verification page
-verifyRouter.get('/:displayId', async (req, res, next) => {
+// GET /verify/:token - Public verification page (secure token lookup)
+verifyRouter.get('/:token', async (req, res, next) => {
     try {
-        const { displayId } = req.params;
+        const { token } = req.params;
+
+        // Only allow verification by secure token, not displayId
+        // Token is 64 hex chars, displayId is like REQ-2026-001
+        const isSecureToken = /^[a-f0-9]{64}$/i.test(token);
+
+        if (!isSecureToken) {
+            return res.json({
+                valid: false,
+                error: 'Неверный токен верификации',
+            });
+        }
 
         const request = await prisma.request.findUnique({
-            where: { displayId },
+            where: { verifyToken: token },
             include: {
                 document: {
                     include: { versions: true },
@@ -25,7 +37,14 @@ verifyRouter.get('/:displayId', async (req, res, next) => {
             });
         }
 
-        // Return valid for both signed and pending documents
+        // Only return data for signed documents
+        if (request.status !== 'signed') {
+            return res.json({
+                valid: false,
+                error: 'Документ еще не подписан',
+            });
+        }
+
         const signedVersion = request.document?.versions.find((v) => v.versionType === 'signed');
 
         res.json({
@@ -39,7 +58,7 @@ verifyRouter.get('/:displayId', async (req, res, next) => {
                 signedAt: request.signedAt,
                 createdAt: request.createdAt,
             },
-            documentUrl: signedVersion ? `/api/public/verify/${displayId}/document` : null,
+            documentUrl: signedVersion ? `/api/public/verify/${token}/document` : null,
             fileHash: signedVersion?.fileHash || null,
             originalHash: request.document?.originalHash || null,
         });
@@ -48,13 +67,18 @@ verifyRouter.get('/:displayId', async (req, res, next) => {
     }
 });
 
-// GET /verify/:displayId/document - Public signed PDF download
-verifyRouter.get('/:displayId/document', async (req, res, next) => {
+// GET /verify/:token/document - Public signed PDF download
+verifyRouter.get('/:token/document', async (req, res, next) => {
     try {
-        const { displayId } = req.params;
+        const { token } = req.params;
+
+        // Validate token format
+        if (!/^[a-f0-9]{64}$/i.test(token)) {
+            return res.status(404).json({ error: 'Документ не найден' });
+        }
 
         const request = await prisma.request.findUnique({
-            where: { displayId },
+            where: { verifyToken: token },
             include: {
                 document: {
                     include: { versions: true },
@@ -72,10 +96,7 @@ verifyRouter.get('/:displayId/document', async (req, res, next) => {
             return res.status(404).json({ error: 'Подписанный документ не найден' });
         }
 
-        const encodedFilename = encodeURIComponent(`${request.documentName}_signed.pdf`);
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodedFilename}`);
-        res.sendFile(signedVersion.storagePath);
+        await serveFile(res, signedVersion.storagePath, `${request.documentName}_signed.pdf`);
     } catch (error) {
         next(error);
     }

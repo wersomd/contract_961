@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 type FetchOptions = RequestInit & {
     headers?: Record<string, string>;
@@ -41,13 +41,12 @@ async function request<T>(endpoint: string, options: FetchOptions = {}): Promise
     const response = await fetch(url, config);
 
     if (!response.ok) {
-        if (response.status === 401) {
-            // Handle unauthorized access (e.g., clear token and redirect)
-            localStorage.removeItem('token');
-            // Ideally dispatch an event or use context to redirect
-            window.location.href = '/'; // Simple redirect for now
-        }
         const data = await response.json().catch(() => ({}));
+        if (response.status === 401 && !endpoint.includes('/auth/login')) {
+            // Handle unauthorized access — but NOT for login attempts
+            localStorage.removeItem('token');
+            window.location.href = '/';
+        }
         throw new ApiError(response.status, data);
     }
 

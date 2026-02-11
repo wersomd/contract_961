@@ -35,14 +35,13 @@ services:
       DATABASE_URL: ${DATABASE_URL}
     volumes:
       - uploads_data:/app/uploads
-    # Port NOT exposed to host — only accessible via nginx container
     deploy:
       resources:
         limits:
           memory: 512M
           cpus: '1.0'
 
-  # Frontend (nginx)
+  # Frontend (nginx) — exposed on port 8080 for host-level nginx to proxy
   frontend:
     build:
       context: ./frontend
@@ -52,7 +51,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "80:80"
+      - "127.0.0.1:8080:80"
     deploy:
       resources:
         limits:

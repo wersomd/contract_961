@@ -146,8 +146,32 @@ export function RequestDetailPage({ requestId, onBack }: RequestDetailPageProps)
   };
 
   const handleDownload = () => {
-    if (documentUrl) {
-      window.open(documentUrl, '_blank');
+    if (pdfBlobUrl) {
+      // Use already-fetched blob URL (has auth)
+      const a = document.createElement('a');
+      a.href = pdfBlobUrl;
+      a.download = request?.status === 'signed'
+        ? `${request.documentName}_signed.pdf`
+        : `${request?.documentName}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } else if (documentUrl) {
+      // Fallback: fetch with auth and download
+      const token = localStorage.getItem('token');
+      fetch(documentUrl, { headers: { 'Authorization': `Bearer ${token}` } })
+        .then(res => res.blob())
+        .then(blob => {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${request?.documentName}.pdf`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        })
+        .catch(() => toast.error('Ошибка при скачивании'));
     } else {
       toast.error('Документ недоступен');
     }
@@ -296,11 +320,6 @@ export function RequestDetailPage({ requestId, onBack }: RequestDetailPageProps)
                     <User className="w-4 h-4 text-muted-foreground" />
                     <span className="text-muted-foreground">Компания:</span>
                     <span className="font-medium ml-auto">{request.clientName ? 'Частное лицо' : '-'}</span>
-                  </div>
-                  <div className="flex items-center gap-3 text-sm">
-                    <Clock className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-muted-foreground">Дата регистрации:</span>
-                    <span className="font-medium ml-auto">-</span>
                   </div>
                 </div>
               </div>

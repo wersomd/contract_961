@@ -44,16 +44,16 @@ function AppContent() {
   const [selectedRequestId, setSelectedRequestId] = React.useState<string>('');
   const [clientToken, setClientToken] = React.useState<string | null>(null);
 
-  // Check if this is a client signing URL: /client/:token or verify URL: /verify/:displayId
+  // Check if this is a client signing URL: /client/:token or verify URL: /verify/:verifyToken
   React.useEffect(() => {
     const path = window.location.pathname;
     const clientMatch = path.match(/^\/client\/([a-zA-Z0-9-]+)/);
-    const verifyMatch = path.match(/^\/verify\/([A-Z]{3}-\d{4}-\d{3})/);
+    const verifyMatch = path.match(/^\/verify\/([a-f0-9]{64})/i); // 64 hex chars
     if (clientMatch) {
       setClientToken(clientMatch[1]);
       setCurrentPage('client-view');
     } else if (verifyMatch) {
-      setClientToken(verifyMatch[1]); // Use clientToken to store displayId
+      setClientToken(verifyMatch[1]); // Use clientToken to store verifyToken
       setCurrentPage('verify');
     }
   }, []);
@@ -143,7 +143,7 @@ function AppContent() {
   if (currentPage === 'verify') {
     return (
       <>
-        <VerifyPage displayId={clientToken || undefined} />
+        <VerifyPage token={clientToken || undefined} />
         <Toaster />
       </>
     );

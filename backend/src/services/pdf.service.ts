@@ -5,6 +5,7 @@ import { PDFDocument, rgb, PDFPage } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import QRCode from 'qrcode';
 import { config } from '../config/index.js';
+import { downloadFromS3, uploadBufferToS3, isS3Path } from './storage.service.js';
 
 // Font assets directory (relative to dist/services in production)
 const FONTS_DIR = path.join(process.cwd(), 'src', 'assets', 'fonts');
@@ -12,6 +13,7 @@ const FONTS_DIR = path.join(process.cwd(), 'src', 'assets', 'fonts');
 interface StampOptions {
     originalPath: string;
     displayId: string;
+    verifyToken: string; // Secure token for verification URL
     clientName: string;
     clientPhone: string;
     signedAt: Date;
@@ -94,10 +96,15 @@ async function generateQRCode(data: string, size: number = 80): Promise<Uint8Arr
  * Stamp PDF with signature block at bottom of first page
  */
 export async function stampPdf(options: StampOptions): Promise<StampResult> {
-    const { originalPath, displayId, clientName, clientPhone, signedAt, organizationName } = options;
+    const { originalPath, displayId, verifyToken, clientName, clientPhone, signedAt, organizationName } = options;
 
-    // Load original PDF
-    const originalBytes = await fs.readFile(originalPath);
+    // Load original PDF (from S3 or local disk)
+    let originalBytes: Buffer;
+    if (isS3Path(originalPath)) {
+        originalBytes = await downloadFromS3(originalPath);
+    } else {
+        originalBytes = await fs.readFile(originalPath) as Buffer;
+    }
     const pdfDoc = await PDFDocument.load(originalBytes);
 
     // Register fontkit for custom fonts
@@ -127,8 +134,8 @@ export async function stampPdf(options: StampOptions): Promise<StampResult> {
 
     const { width: pageWidth } = targetPage.getSize();
 
-    // Verify URL for main QR
-    const verifyUrl = `${config.publicUrl}/verify/${displayId}`;
+    // Verify URL using secure token (not displayId!)
+    const verifyUrl = `${config.publicUrl}/verify/${verifyToken}`;
     const signedDocUrl = `${config.publicUrl}/download/${displayId}`;
 
     // Generate QR codes
@@ -194,20 +201,12 @@ export async function stampPdf(options: StampOptions): Promise<StampResult> {
     });
     textY -= 14;
 
-    targetPage.drawText('перейдите по ссылке:', {
+    targetPage.drawText('сканируйте QR-код или перейдите на сайт 961.kz', {
         x: textX,
         y: textY,
         size: 9,
         font,
-        color: textColor,
-    });
-
-    targetPage.drawText(verifyUrl, {
-        x: textX + 95,
-        y: textY,
-        size: 9,
-        font,
-        color: linkColor,
+        color: mutedColor,
     });
     textY -= 20;
 
@@ -301,17 +300,26 @@ export async function stampPdf(options: StampOptions): Promise<StampResult> {
     const stampedBytes = await pdfDoc.save();
     const hash = crypto.createHash('sha256').update(stampedBytes).digest('hex');
 
-    // Create signed directory if needed
+    // Create signed directory if needed (local)
     const signedDir = path.join(config.uploadDir, 'signed');
     await fs.mkdir(signedDir, { recursive: true });
 
-    // Save file
+    // Save file locally first
     const filename = `${displayId.replace(/[^a-zA-Z0-9-]/g, '_')}_signed.pdf`;
     const signedPath = path.join(signedDir, filename);
     await fs.writeFile(signedPath, stampedBytes);
 
+    // Upload to S3 if enabled
+    let finalPath = signedPath;
+    if (config.s3.enabled) {
+        const s3Key = `signed/${filename}`;
+        finalPath = await uploadBufferToS3(stampedBytes, s3Key);
+        // Remove local copy — S3 is the source of truth
+        await fs.unlink(signedPath).catch(() => { });
+    }
+
     return {
-        path: signedPath,
+        path: finalPath,
         hash,
     };
 }

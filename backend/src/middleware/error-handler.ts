@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { ZodError } from 'zod';
 
 export class AppError extends Error {
     constructor(
@@ -23,6 +24,15 @@ export const errorHandler = (
         return res.status(err.statusCode).json({
             error: err.message,
             statusCode: err.statusCode,
+        });
+    }
+
+    // Zod validation errors
+    if (err instanceof ZodError) {
+        const message = err.errors.map(e => e.message).join(', ');
+        return res.status(400).json({
+            error: message || 'Некорректные данные',
+            statusCode: 400,
         });
     }
 

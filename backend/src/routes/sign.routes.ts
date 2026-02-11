@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
 import { prisma } from '../lib/prisma.js';
@@ -7,6 +8,7 @@ import { AppError } from '../middleware/error-handler.js';
 import { createAuditLog, maskPhone } from '../services/audit.service.js';
 import { smsProvider } from '../services/sms.service.js';
 import { stampPdf } from '../services/pdf.service.js';
+import { serveFile } from '../services/storage.service.js';
 
 export const signRouter = Router();
 
@@ -102,7 +104,7 @@ signRouter.get('/:token', async (req, res, next) => {
                 clientName: request.clientName,
                 status: request.status,
             },
-            documentUrl: `/sign/${token}/document`,
+            documentUrl: `/ sign / ${token}/document`,
         });
     } catch (error) {
         next(error);
@@ -121,10 +123,7 @@ signRouter.get('/:token/document', async (req, res, next) => {
             throw new AppError(404, 'Документ не найден');
         }
 
-        const encodedFilename = encodeURIComponent(`${request.documentName}.pdf`);
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodedFilename}`);
-        res.sendFile(request.document.originalPath);
+        await serveFile(res, request.document.originalPath, `${request.documentName}.pdf`);
     } catch (error) {
         next(error);
     }
@@ -289,7 +288,10 @@ signRouter.post('/:token/verify', verifyCodeLimiter, async (req, res, next) => {
             data: { isActive: false, verifiedAt: new Date() },
         });
 
-        // Stamp PDF
+        // Generate secure verification token FIRST (needed for PDF stamp)
+        const verifyToken = crypto.randomBytes(32).toString('hex');
+
+        // Stamp PDF with verification token
         let signedPath: string | null = null;
         let signedHash: string | null = null;
 
@@ -298,6 +300,7 @@ signRouter.post('/:token/verify', verifyCodeLimiter, async (req, res, next) => {
                 const result = await stampPdf({
                     originalPath: request.document.originalPath,
                     displayId: request.displayId,
+                    verifyToken, // Pass secure token for QR code URL
                     clientName: request.clientName,
                     clientPhone: request.clientPhone,
                     signedAt: new Date(),
@@ -329,6 +332,7 @@ signRouter.post('/:token/verify', verifyCodeLimiter, async (req, res, next) => {
                 signedAt: new Date(),
                 clientIp: req.ip,
                 clientUserAgent: req.headers['user-agent'],
+                verifyToken,
             },
         });
 
@@ -368,10 +372,7 @@ signRouter.get('/:token/signed-document', async (req, res, next) => {
             throw new AppError(404, 'Подписанный документ не найден');
         }
 
-        const encodedFilename = encodeURIComponent(`${request.documentName}_signed.pdf`);
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodedFilename}`);
-        res.sendFile(signedVersion.storagePath);
+        await serveFile(res, signedVersion.storagePath, `${request.documentName}_signed.pdf`, 'attachment');
     } catch (error) {
         next(error);
     }
