@@ -287,7 +287,7 @@ export function RequestDetailPage({ requestId, onBack }: RequestDetailPageProps)
                   documentName={request.documentName}
                   onDownload={handleDownload}
                   isSigned={request.status === 'signed'}
-                  url={pdfBlobUrl}
+                  url={pdfBlobUrl || undefined}
                 />
               </div>
             </Card>

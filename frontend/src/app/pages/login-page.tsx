@@ -29,12 +29,15 @@ export function LoginPage({ onLogin, onForgotPassword }: LoginPageProps) {
       onLogin?.(response.token, response.user);
     } catch (err: any) {
       console.error('Login error:', err);
-      // Extract error message from our ApiError structure
-      const message =
-        err?.data?.error ||
-        err?.data?.message ||
-        err?.message ||
-        'Неверный email или пароль';
+      // Extract error message from various response structures
+      let message = 'Неверный email или пароль';
+      if (err?.data?.error) {
+        message = err.data.error;
+      } else if (err?.data?.message) {
+        message = err.data.message;
+      } else if (typeof err?.message === 'string' && !err.message.startsWith('API Error')) {
+        message = err.message;
+      }
       setError(message);
     } finally {
       setLoading(false);
