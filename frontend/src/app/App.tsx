@@ -102,7 +102,6 @@ function AppContent() {
     );
   }
 
-
   // Show loading while checking auth (public pages already handled above)
   if (isLoading) {
     return (
