@@ -78,6 +78,34 @@ npm run dev
 - **Admin**: admin@961.kz / admin123
 - **Manager**: manager@961.kz / manager123
 
+### Создание дополнительных пользователей (менеджеров)
+
+Для создания новых пользователей используйте CLI скрипт:
+
+```bash
+# Через Docker
+docker-compose exec backend npx tsx prisma/create-user.ts \
+  --email manager@example.com \
+  --name "Имя Менеджера" \
+  --password "SecurePassword123!" \
+  --role manager
+
+# Локально
+cd backend
+npx tsx prisma/create-user.ts \
+  --email manager@example.com \
+  --name "Имя Менеджера" \
+  --password "SecurePassword123!" \
+  --role manager
+```
+
+**Параметры:**
+- `--email` - Email пользователя (обязательно)
+- `--name` - Отображаемое имя (обязательно)
+- `--password` - Пароль (обязательно)
+- `--role` - Роль: `admin` или `manager` (по умолчанию: `manager`)
+- `--org` - ID организации (по умолчанию: `default-org`)
+
 ---
 
 ## Архитектура

@@ -342,15 +342,6 @@ export function RequestDetailPage({ requestId, onBack }: RequestDetailPageProps)
                 <Separator />
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground flex items-center gap-2">
-                    <Clock className="w-4 h-4" /> Дедлайн
-                  </span>
-                  <span className="font-medium text-sm">
-                    {safeFormat(request.deadline, 'd MMM yyyy')}
-                  </span>
-                </div>
-                <Separator />
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground flex items-center gap-2">
                     <User className="w-4 h-4" /> Менеджер
                   </span>
                   <span className="font-medium text-sm">
