@@ -44,6 +44,11 @@ function AppContent() {
   const [selectedRequestId, setSelectedRequestId] = React.useState<string>('');
   const [clientToken, setClientToken] = React.useState<string | null>(null);
 
+  // Helper to check if current page is public (no auth required)
+  const isPublicPage = (page: Page): boolean => {
+    return page === 'client-view' || page === 'client-code' || page === 'client-success' || page === 'verify';
+  };
+
   // Check if this is a client signing URL: /client/:token or verify URL: /verify/:verifyToken
   React.useEffect(() => {
     const path = window.location.pathname;
@@ -104,7 +109,7 @@ function AppContent() {
 
 
   // Show loading while checking auth
-  if (isLoading && currentPage !== 'client-view' && currentPage !== 'client-code' && currentPage !== 'client-success' && currentPage !== 'verify') {
+  if (isLoading && !isPublicPage(currentPage)) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
@@ -113,7 +118,7 @@ function AppContent() {
   }
 
   // Not logged in - show login (but NOT for client/verify pages which are public)
-  if (!user && currentPage !== 'client-view' && currentPage !== 'client-code' && currentPage !== 'client-success' && currentPage !== 'verify') {
+  if (!user && !isPublicPage(currentPage)) {
     if (currentPage === 'reset-password') {
       return (
         <>
