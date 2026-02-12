@@ -58,7 +58,51 @@ function AppContent() {
     }
   }, []);
 
-  // Show loading while checking auth
+  // Client pages (for signing flow) - PUBLIC ACCESS, NO AUTH REQUIRED
+  if (currentPage.startsWith('client-')) {
+    switch (currentPage) {
+      case 'client-view':
+        return (
+          <>
+            <ClientViewDocumentPage
+              token={clientToken}
+              onSign={() => setCurrentPage('client-code')}
+            />
+            <Toaster />
+          </>
+        );
+      case 'client-code':
+        return (
+          <>
+            <ClientEnterCodePage
+              token={clientToken}
+              onSuccess={() => setCurrentPage('client-success')}
+              onBack={() => setCurrentPage('client-view')}
+            />
+            <Toaster />
+          </>
+        );
+      case 'client-success':
+        return (
+          <>
+            <ClientSignedSuccessPage token={clientToken} />
+            <Toaster />
+          </>
+        );
+    }
+  }
+
+  // Verify page (public) - PUBLIC ACCESS, NO AUTH REQUIRED
+  if (currentPage === 'verify') {
+    return (
+      <>
+        <VerifyPage token={clientToken || undefined} />
+        <Toaster />
+      </>
+    );
+  }
+
+  // Show loading while checking auth (public pages already handled above)
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -67,7 +111,7 @@ function AppContent() {
     );
   }
 
-  // Not logged in - show login
+  // Not logged in - show login (public pages already handled above)
   if (!user) {
     if (currentPage === 'reset-password') {
       return (
@@ -104,50 +148,6 @@ function AppContent() {
     logout();
     setCurrentPage('login');
   };
-
-  // Client pages (for signing flow)
-  if (currentPage.startsWith('client-')) {
-    switch (currentPage) {
-      case 'client-view':
-        return (
-          <>
-            <ClientViewDocumentPage
-              token={clientToken}
-              onSign={() => setCurrentPage('client-code')}
-            />
-            <Toaster />
-          </>
-        );
-      case 'client-code':
-        return (
-          <>
-            <ClientEnterCodePage
-              token={clientToken}
-              onSuccess={() => setCurrentPage('client-success')}
-              onBack={() => setCurrentPage('client-view')}
-            />
-            <Toaster />
-          </>
-        );
-      case 'client-success':
-        return (
-          <>
-            <ClientSignedSuccessPage token={clientToken} />
-            <Toaster />
-          </>
-        );
-    }
-  }
-
-  // Verify page (public)
-  if (currentPage === 'verify') {
-    return (
-      <>
-        <VerifyPage token={clientToken || undefined} />
-        <Toaster />
-      </>
-    );
-  }
 
   // Admin pages
   const renderAdminPage = () => {
