@@ -119,7 +119,7 @@ export async function stampPdf(options: StampOptions): Promise<StampResult> {
 
     // Always add a new page for the signature block to avoid overlapping content
     const signatureBlockHeight = 280;
-    
+
     // Add a new page at the end of the document for the signature
     const targetPage = pdfDoc.addPage([595, 842]); // A4 size
     const startY = 842 - 50; // Start from top with 50pt margin
