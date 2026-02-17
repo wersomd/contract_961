@@ -93,7 +93,7 @@ async function generateQRCode(data: string, size: number = 80): Promise<Uint8Arr
 }
 
 /**
- * Stamp PDF with signature block at bottom of first page
+ * Stamp PDF with signature block on a new page at the end
  */
 export async function stampPdf(options: StampOptions): Promise<StampResult> {
     const { originalPath, displayId, verifyToken, clientName, clientPhone, signedAt, organizationName } = options;
@@ -117,20 +117,12 @@ export async function stampPdf(options: StampOptions): Promise<StampResult> {
     const font = await pdfDoc.embedFont(fontRegularBytes);
     const fontBold = await pdfDoc.embedFont(fontBoldBytes);
 
-    // Get first page or create new page if needed
-    const pages = pdfDoc.getPages();
-    let targetPage: PDFPage;
-    let startY: number;
-
+    // Always add a new page for the signature block to avoid overlapping content
     const signatureBlockHeight = 280;
-
-    if (pages.length > 0) {
-        targetPage = pages[0];
-        startY = 50 + signatureBlockHeight;
-    } else {
-        targetPage = pdfDoc.addPage([595, 842]);
-        startY = 842 - 50;
-    }
+    
+    // Add a new page at the end of the document for the signature
+    const targetPage = pdfDoc.addPage([595, 842]); // A4 size
+    const startY = 842 - 50; // Start from top with 50pt margin
 
     const { width: pageWidth } = targetPage.getSize();
 
