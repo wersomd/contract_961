@@ -1,7 +1,8 @@
 import path from 'path';
 import fs from 'fs/promises';
 import crypto from 'crypto';
-import { PDFDocument, rgb, PDFPage } from 'pdf-lib';
+import { PDFDocument, rgb, PDFPage, PDFName, PDFRawStream, PDFArray, PDFRef, PDFStream } from 'pdf-lib';
+import { decodePDFRawStream } from 'pdf-lib/cjs/core/streams/decode.js';
 import fontkit from '@pdf-lib/fontkit';
 import QRCode from 'qrcode';
 import { config } from '../config/index.js';
@@ -93,7 +94,116 @@ async function generateQRCode(data: string, size: number = 80): Promise<Uint8Arr
 }
 
 /**
- * Stamp PDF with signature block on a new page at the end
+ * Analyze the content stream of a PDF page to find the lowest Y coordinate
+ * used by any drawing operation. Returns the lowest Y value found.
+ * If parsing fails, returns 0 (meaning "no space available" → new page).
+ */
+function getLowestContentY(page: PDFPage, pageHeight: number): number {
+    try {
+        const node = page.node;
+        const contentsRef = node.get(PDFName.of('Contents'));
+
+        if (!contentsRef) return pageHeight; // Empty page — all space available
+
+        // Collect all content stream bytes
+        let allBytes = new Uint8Array(0);
+        const context = node.context;
+
+        const collectStreamBytes = (ref: any): void => {
+            const obj = context.lookup(ref);
+            if (!obj) return;
+
+            if (obj instanceof PDFArray) {
+                for (let i = 0; i < obj.size(); i++) {
+                    collectStreamBytes(obj.get(i));
+                }
+                return;
+            }
+
+            if (obj instanceof PDFRawStream) {
+                try {
+                    const decoded = decodePDFRawStream(obj).decode();
+                    const merged = new Uint8Array(allBytes.length + decoded.length);
+                    merged.set(allBytes);
+                    merged.set(decoded, allBytes.length);
+                    allBytes = merged;
+                } catch {
+                    // If decoding fails, skip this stream
+                }
+            }
+        };
+
+        collectStreamBytes(contentsRef);
+
+        if (allBytes.length === 0) return pageHeight;
+
+        const contentStr = new TextDecoder('latin1').decode(allBytes);
+
+        // Find Y coordinates from text and graphics operators
+        let lowestY = pageHeight;
+
+        // Pattern: "x y Td" or "x y TD" — text position operators
+        const tdPattern = /([\d.\-]+)\s+([\d.\-]+)\s+T[dD]/g;
+        let match;
+        while ((match = tdPattern.exec(contentStr)) !== null) {
+            const y = parseFloat(match[2]);
+            if (!isNaN(y) && y >= 0 && y < lowestY) {
+                lowestY = y;
+            }
+        }
+
+        // Pattern: "a b c d e f Tm" — text matrix (f is Y position)
+        const tmPattern = /([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+Tm/g;
+        while ((match = tmPattern.exec(contentStr)) !== null) {
+            const y = parseFloat(match[6]);
+            if (!isNaN(y) && y >= 0 && y < lowestY) {
+                lowestY = y;
+            }
+        }
+
+        // Pattern: "a b c d e f cm" — concat matrix (f is Y translation)
+        const cmPattern = /([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+cm/g;
+        while ((match = cmPattern.exec(contentStr)) !== null) {
+            const y = parseFloat(match[6]);
+            if (!isNaN(y) && y >= 0 && y < lowestY) {
+                lowestY = y;
+            }
+        }
+
+        // Pattern: "x y w h re" — rectangle operator
+        const rePattern = /([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+re/g;
+        while ((match = rePattern.exec(contentStr)) !== null) {
+            const y = parseFloat(match[2]);
+            const h = parseFloat(match[4]);
+            if (!isNaN(y) && !isNaN(h)) {
+                const bottomY = Math.min(y, y + h);
+                if (bottomY >= 0 && bottomY < lowestY) {
+                    lowestY = bottomY;
+                }
+            }
+        }
+
+        // Pattern: "x y m" or "x y l" — moveto / lineto
+        const mlPattern = /([\d.\-]+)\s+([\d.\-]+)\s+[ml]/g;
+        while ((match = mlPattern.exec(contentStr)) !== null) {
+            const y = parseFloat(match[2]);
+            if (!isNaN(y) && y >= 0 && y < lowestY) {
+                lowestY = y;
+            }
+        }
+
+        // If we couldn't find any Y coordinates, assume page is full
+        if (lowestY >= pageHeight) return pageHeight;
+
+        return lowestY;
+    } catch (err) {
+        console.warn('Could not analyze page content stream:', err);
+        return 0; // Fallback: assume no space → add new page
+    }
+}
+
+/**
+ * Stamp PDF with signature block — placed after content if space allows
  */
 export async function stampPdf(options: StampOptions): Promise<StampResult> {
     const { originalPath, displayId, verifyToken, clientName, clientPhone, signedAt, organizationName } = options;
@@ -117,12 +227,31 @@ export async function stampPdf(options: StampOptions): Promise<StampResult> {
     const font = await pdfDoc.embedFont(fontRegularBytes);
     const fontBold = await pdfDoc.embedFont(fontBoldBytes);
 
-    // Always add a new page for the signature block to avoid overlapping content
-    const signatureBlockHeight = 280;
+    // Signature block requires ~250pt of vertical space
+    const signatureBlockHeight = 250;
+    const bottomMargin = 40;
 
-    // Add a new page at the end of the document for the signature
-    const targetPage = pdfDoc.addPage([595, 842]); // A4 size
-    const startY = 842 - 50; // Start from top with 50pt margin
+    // Determine where to place the signature block
+    const pages = pdfDoc.getPages();
+    const lastPage = pages[pages.length - 1];
+    const { height: lastPageHeight, width: lastPageWidth } = lastPage.getSize();
+
+    // Analyze content stream to find lowest Y coordinate on the last page
+    const lowestContentY = getLowestContentY(lastPage, lastPageHeight);
+    const availableSpace = lowestContentY - bottomMargin;
+
+    let targetPage: PDFPage;
+    let startY: number;
+
+    if (availableSpace >= signatureBlockHeight) {
+        // Enough space on the last page — place signature block here
+        targetPage = lastPage;
+        startY = lowestContentY - 15; // 15pt gap below content
+    } else {
+        // Not enough space — add a new page
+        targetPage = pdfDoc.addPage([595, 842]); // A4 size
+        startY = 842 - 50; // Start from top with margin
+    }
 
     const { width: pageWidth } = targetPage.getSize();
 
