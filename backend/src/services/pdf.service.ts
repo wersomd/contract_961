@@ -1,8 +1,8 @@
 import path from 'path';
 import fs from 'fs/promises';
 import crypto from 'crypto';
-import { PDFDocument, rgb, PDFPage, PDFName, PDFRawStream, PDFArray, PDFRef, PDFStream } from 'pdf-lib';
-import { decodePDFRawStream } from 'pdf-lib/cjs/core/streams/decode.js';
+import zlib from 'zlib';
+import { PDFDocument, rgb, PDFPage, PDFName, PDFRawStream, PDFArray } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import QRCode from 'qrcode';
 import { config } from '../config/index.js';
@@ -94,9 +94,31 @@ async function generateQRCode(data: string, size: number = 80): Promise<Uint8Arr
 }
 
 /**
+ * Decompress PDF stream bytes based on the Filter entry in its dictionary.
+ * Handles FlateDecode (most common). Returns raw bytes if uncompressed.
+ */
+function decompressStreamBytes(stream: PDFRawStream): Uint8Array | null {
+    try {
+        const rawBytes = stream.contents;
+        const dict = stream.dict;
+        const filterEntry = dict.get(PDFName.of('Filter'));
+        const filterStr = filterEntry ? filterEntry.toString() : '';
+
+        if (filterStr.includes('FlateDecode')) {
+            return new Uint8Array(zlib.inflateSync(Buffer.from(rawBytes)));
+        }
+
+        // Uncompressed or unknown filter — return raw
+        return rawBytes;
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Analyze the content stream of a PDF page to find the lowest Y coordinate
  * used by any drawing operation. Returns the lowest Y value found.
- * If parsing fails, returns 0 (meaning "no space available" → new page).
+ * If parsing fails, returns 0 (meaning "no space available" → add new page).
  */
 function getLowestContentY(page: PDFPage, pageHeight: number): number {
     try {
@@ -105,47 +127,43 @@ function getLowestContentY(page: PDFPage, pageHeight: number): number {
 
         if (!contentsRef) return pageHeight; // Empty page — all space available
 
-        // Collect all content stream bytes
-        let allBytes = new Uint8Array(0);
         const context = node.context;
+        let allText = '';
 
-        const collectStreamBytes = (ref: any): void => {
+        const collectStreamText = (ref: any): void => {
             const obj = context.lookup(ref);
             if (!obj) return;
 
             if (obj instanceof PDFArray) {
                 for (let i = 0; i < obj.size(); i++) {
-                    collectStreamBytes(obj.get(i));
+                    collectStreamText(obj.get(i));
                 }
                 return;
             }
 
             if (obj instanceof PDFRawStream) {
-                try {
-                    const decoded = decodePDFRawStream(obj).decode();
-                    const merged = new Uint8Array(allBytes.length + decoded.length);
-                    merged.set(allBytes);
-                    merged.set(decoded, allBytes.length);
-                    allBytes = merged;
-                } catch {
-                    // If decoding fails, skip this stream
+                const decoded = decompressStreamBytes(obj);
+                if (decoded && decoded.length > 0) {
+                    allText += new TextDecoder('latin1').decode(decoded) + '\n';
                 }
             }
         };
 
-        collectStreamBytes(contentsRef);
+        collectStreamText(contentsRef);
 
-        if (allBytes.length === 0) return pageHeight;
+        if (allText.length === 0) {
+            // Could not decode any content stream — assume page is full
+            return 0;
+        }
 
-        const contentStr = new TextDecoder('latin1').decode(allBytes);
-
-        // Find Y coordinates from text and graphics operators
+        // Find Y coordinates from PDF text and graphics operators
         let lowestY = pageHeight;
+
+        let match;
 
         // Pattern: "x y Td" or "x y TD" — text position operators
         const tdPattern = /([\d.\-]+)\s+([\d.\-]+)\s+T[dD]/g;
-        let match;
-        while ((match = tdPattern.exec(contentStr)) !== null) {
+        while ((match = tdPattern.exec(allText)) !== null) {
             const y = parseFloat(match[2]);
             if (!isNaN(y) && y >= 0 && y < lowestY) {
                 lowestY = y;
@@ -154,7 +172,7 @@ function getLowestContentY(page: PDFPage, pageHeight: number): number {
 
         // Pattern: "a b c d e f Tm" — text matrix (f is Y position)
         const tmPattern = /([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+Tm/g;
-        while ((match = tmPattern.exec(contentStr)) !== null) {
+        while ((match = tmPattern.exec(allText)) !== null) {
             const y = parseFloat(match[6]);
             if (!isNaN(y) && y >= 0 && y < lowestY) {
                 lowestY = y;
@@ -163,7 +181,7 @@ function getLowestContentY(page: PDFPage, pageHeight: number): number {
 
         // Pattern: "a b c d e f cm" — concat matrix (f is Y translation)
         const cmPattern = /([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+cm/g;
-        while ((match = cmPattern.exec(contentStr)) !== null) {
+        while ((match = cmPattern.exec(allText)) !== null) {
             const y = parseFloat(match[6]);
             if (!isNaN(y) && y >= 0 && y < lowestY) {
                 lowestY = y;
@@ -172,7 +190,7 @@ function getLowestContentY(page: PDFPage, pageHeight: number): number {
 
         // Pattern: "x y w h re" — rectangle operator
         const rePattern = /([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+re/g;
-        while ((match = rePattern.exec(contentStr)) !== null) {
+        while ((match = rePattern.exec(allText)) !== null) {
             const y = parseFloat(match[2]);
             const h = parseFloat(match[4]);
             if (!isNaN(y) && !isNaN(h)) {
@@ -185,15 +203,15 @@ function getLowestContentY(page: PDFPage, pageHeight: number): number {
 
         // Pattern: "x y m" or "x y l" — moveto / lineto
         const mlPattern = /([\d.\-]+)\s+([\d.\-]+)\s+[ml]/g;
-        while ((match = mlPattern.exec(contentStr)) !== null) {
+        while ((match = mlPattern.exec(allText)) !== null) {
             const y = parseFloat(match[2]);
             if (!isNaN(y) && y >= 0 && y < lowestY) {
                 lowestY = y;
             }
         }
 
-        // If we couldn't find any Y coordinates, assume page is full
-        if (lowestY >= pageHeight) return pageHeight;
+        // If no Y coordinates found, assume page is full
+        if (lowestY >= pageHeight) return 0;
 
         return lowestY;
     } catch (err) {
@@ -203,7 +221,8 @@ function getLowestContentY(page: PDFPage, pageHeight: number): number {
 }
 
 /**
- * Stamp PDF with signature block — placed after content if space allows
+ * Stamp PDF with signature block — placed after content if space allows,
+ * otherwise on a new page.
  */
 export async function stampPdf(options: StampOptions): Promise<StampResult> {
     const { originalPath, displayId, verifyToken, clientName, clientPhone, signedAt, organizationName } = options;
@@ -234,7 +253,7 @@ export async function stampPdf(options: StampOptions): Promise<StampResult> {
     // Determine where to place the signature block
     const pages = pdfDoc.getPages();
     const lastPage = pages[pages.length - 1];
-    const { height: lastPageHeight, width: lastPageWidth } = lastPage.getSize();
+    const { height: lastPageHeight } = lastPage.getSize();
 
     // Analyze content stream to find lowest Y coordinate on the last page
     const lowestContentY = getLowestContentY(lastPage, lastPageHeight);
