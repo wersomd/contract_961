@@ -116,9 +116,107 @@ function decompressStreamBytes(stream: PDFRawStream): Uint8Array | null {
 }
 
 /**
+ * Tokenize a PDF content stream into numbers and operator names,
+ * properly skipping over string literals (...), hex strings <...>,
+ * name objects /Name, and comments %.
+ */
+function tokenizePdfStream(raw: string): string[] {
+    const tokens: string[] = [];
+    let i = 0;
+    const len = raw.length;
+
+    while (i < len) {
+        const ch = raw[i];
+
+        // Skip whitespace
+        if (ch === ' ' || ch === '\n' || ch === '\r' || ch === '\t' || ch === '\0' || ch === '\f') {
+            i++;
+            continue;
+        }
+
+        // Skip PDF comments: % ... newline
+        if (ch === '%') {
+            while (i < len && raw[i] !== '\n' && raw[i] !== '\r') i++;
+            continue;
+        }
+
+        // Skip string literals: (...) with nested parens and escapes
+        if (ch === '(') {
+            let depth = 1;
+            i++;
+            while (i < len && depth > 0) {
+                if (raw[i] === '\\') {
+                    i += 2; // skip escaped char
+                    continue;
+                }
+                if (raw[i] === '(') depth++;
+                if (raw[i] === ')') depth--;
+                i++;
+            }
+            continue;
+        }
+
+        // Skip hex strings: <...>  (but not dict markers <<...>>)
+        if (ch === '<' && i + 1 < len && raw[i + 1] !== '<') {
+            i++;
+            while (i < len && raw[i] !== '>') i++;
+            if (i < len) i++;
+            continue;
+        }
+
+        // Skip dict markers << and >>
+        if (ch === '<' && i + 1 < len && raw[i + 1] === '<') { i += 2; continue; }
+        if (ch === '>' && i + 1 < len && raw[i + 1] === '>') { i += 2; continue; }
+        if (ch === '>') { i++; continue; }
+
+        // Skip array markers [ ]
+        if (ch === '[' || ch === ']') { i++; continue; }
+
+        // Skip PDF name objects: /Name
+        if (ch === '/') {
+            i++;
+            while (i < len && !(' \n\r\t\0\f/<>[]()%'.includes(raw[i]))) i++;
+            continue;
+        }
+
+        // Number: optional sign, digits, optional decimal
+        if (ch === '-' || ch === '+' || ch === '.' || (ch >= '0' && ch <= '9')) {
+            const start = i;
+            if (ch === '-' || ch === '+') i++;
+            while (i < len && ((raw[i] >= '0' && raw[i] <= '9') || raw[i] === '.')) i++;
+            tokens.push(raw.substring(start, i));
+            continue;
+        }
+
+        // Operator: alphabetic chars or * or '
+        if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch === '*' || ch === "'") {
+            const start = i;
+            i++;
+            while (i < len && ((raw[i] >= 'a' && raw[i] <= 'z') || (raw[i] >= 'A' && raw[i] <= 'Z') || raw[i] === '*')) i++;
+            tokens.push(raw.substring(start, i));
+            continue;
+        }
+
+        // Skip unknown bytes
+        i++;
+    }
+
+    return tokens;
+}
+
+/**
  * Analyze the content stream of a PDF page to find the lowest Y coordinate
- * used by any drawing operation. Returns the lowest Y value found.
+ * used by any visible drawing operation. Returns the lowest Y value found.
  * If parsing fails, returns 0 (meaning "no space available" → add new page).
+ *
+ * Key design decisions:
+ * 1. `Td`/`TD` use RELATIVE offsets — we track text line matrix state.
+ * 2. Path operators (`re`, `m`, `l`, `c`) buffer Y values; only commit
+ *    when a PAINT operator (`f`, `S`, `B`, etc.) is seen.
+ *    Clipping-only paths (`W n`) are discarded — prevents full-page
+ *    clipping rectangles from falsely indicating content at Y=0.
+ * 3. Tokenizer skips `(...)` strings and `<...>` hex strings so
+ *    embedded text doesn't create false operators.
  */
 function getLowestContentY(page: PDFPage, pageHeight: number): number {
     try {
@@ -152,71 +250,189 @@ function getLowestContentY(page: PDFPage, pageHeight: number): number {
         collectStreamText(contentsRef);
 
         if (allText.length === 0) {
-            // Could not decode any content stream — assume page is full
             return 0;
         }
 
-        // Find Y coordinates from PDF text and graphics operators
         let lowestY = pageHeight;
 
-        let match;
-
-        // Pattern: "x y Td" or "x y TD" — text position operators
-        const tdPattern = /([\d.\-]+)\s+([\d.\-]+)\s+T[dD]/g;
-        while ((match = tdPattern.exec(allText)) !== null) {
-            const y = parseFloat(match[2]);
+        const trackY = (y: number): void => {
             if (!isNaN(y) && y >= 0 && y < lowestY) {
                 lowestY = y;
             }
-        }
+        };
 
-        // Pattern: "a b c d e f Tm" — text matrix (f is Y position)
-        const tmPattern = /([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+Tm/g;
-        while ((match = tmPattern.exec(allText)) !== null) {
-            const y = parseFloat(match[6]);
-            if (!isNaN(y) && y >= 0 && y < lowestY) {
-                lowestY = y;
+        // ── Text state machine ──
+        let inTextBlock = false;
+        let tlmY = 0;
+
+        // ── Path state ──
+        // Buffer Y values from path construction operators.
+        // Only commit to lowestY when a PAINT operator is seen.
+        // Discard on clip-only paths (W/W* followed by n).
+        let pendingPathYs: number[] = [];
+        let clipPending = false;
+
+        const commitPathYs = (): void => {
+            for (const py of pendingPathYs) trackY(py);
+            pendingPathYs = [];
+            clipPending = false;
+        };
+
+        const discardPathYs = (): void => {
+            pendingPathYs = [];
+            clipPending = false;
+        };
+
+        // Tokenize with proper string/hex skipping
+        const tokens = tokenizePdfStream(allText);
+        const numStack: number[] = [];
+
+        for (let i = 0; i < tokens.length; i++) {
+            const tok = tokens[i];
+            const num = parseFloat(tok);
+
+            if (!isNaN(num) && /^[+\-.\d]/.test(tok)) {
+                numStack.push(num);
+                continue;
+            }
+
+            switch (tok) {
+                // ── Text block ──
+                case 'BT':
+                    inTextBlock = true;
+                    tlmY = 0;
+                    numStack.length = 0;
+                    break;
+
+                case 'ET':
+                    inTextBlock = false;
+                    numStack.length = 0;
+                    break;
+
+                // ── Tm: set text matrix (absolute) — 6 args ──
+                case 'Tm':
+                    if (numStack.length >= 6) {
+                        tlmY = numStack[numStack.length - 1];
+                        trackY(tlmY);
+                    }
+                    numStack.length = 0;
+                    break;
+
+                // ── Td: relative text position — 2 args ──
+                case 'Td':
+                    if (numStack.length >= 2) {
+                        tlmY += numStack[numStack.length - 1];
+                        trackY(tlmY);
+                    }
+                    numStack.length = 0;
+                    break;
+
+                // ── TD: same as Td + set leading ──
+                case 'TD':
+                    if (numStack.length >= 2) {
+                        tlmY += numStack[numStack.length - 1];
+                        trackY(tlmY);
+                    }
+                    numStack.length = 0;
+                    break;
+
+                case 'T*':
+                    numStack.length = 0;
+                    break;
+
+                // ── Text showing operators ──
+                case 'Tj':
+                case 'TJ':
+                case "'":
+                    if (inTextBlock) trackY(tlmY);
+                    numStack.length = 0;
+                    break;
+
+                // ── cm: concat matrix — 6 args ──
+                case 'cm':
+                    if (numStack.length >= 6) {
+                        trackY(numStack[numStack.length - 1]);
+                    }
+                    numStack.length = 0;
+                    break;
+
+                // ── PATH CONSTRUCTION (buffer Y, don't commit yet) ──
+                case 're':
+                    if (numStack.length >= 4) {
+                        const h = numStack[numStack.length - 1];
+                        const y = numStack[numStack.length - 3];
+                        pendingPathYs.push(Math.min(y, y + h));
+                    }
+                    numStack.length = 0;
+                    break;
+
+                case 'm':
+                    if (numStack.length >= 2) {
+                        pendingPathYs.push(numStack[numStack.length - 1]);
+                    }
+                    numStack.length = 0;
+                    break;
+
+                case 'l':
+                    if (numStack.length >= 2) {
+                        pendingPathYs.push(numStack[numStack.length - 1]);
+                    }
+                    numStack.length = 0;
+                    break;
+
+                case 'c':
+                    if (numStack.length >= 6) {
+                        pendingPathYs.push(numStack[numStack.length - 1]);
+                        pendingPathYs.push(numStack[numStack.length - 3]);
+                        pendingPathYs.push(numStack[numStack.length - 5]);
+                    }
+                    numStack.length = 0;
+                    break;
+
+                case 'v':
+                    if (numStack.length >= 4) {
+                        pendingPathYs.push(numStack[numStack.length - 1]);
+                        pendingPathYs.push(numStack[numStack.length - 3]);
+                    }
+                    numStack.length = 0;
+                    break;
+
+                // ── PAINT operators — commit buffered path Y values ──
+                case 'f': case 'F': case 'f*':
+                case 'S': case 's':
+                case 'B': case 'B*': case 'b': case 'b*':
+                    commitPathYs();
+                    numStack.length = 0;
+                    break;
+
+                // ── CLIP operators ──
+                case 'W': case 'W*':
+                    clipPending = true;
+                    numStack.length = 0;
+                    break;
+
+                // ── n: end path without painting ──
+                case 'n':
+                    // W n or W* n = clip only → discard path Y values
+                    // n alone = invisible path → also discard
+                    discardPathYs();
+                    numStack.length = 0;
+                    break;
+
+                default:
+                    numStack.length = 0;
+                    break;
             }
         }
 
-        // Pattern: "a b c d e f cm" — concat matrix (f is Y translation)
-        const cmPattern = /([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+cm/g;
-        while ((match = cmPattern.exec(allText)) !== null) {
-            const y = parseFloat(match[6]);
-            if (!isNaN(y) && y >= 0 && y < lowestY) {
-                lowestY = y;
-            }
-        }
+        console.log(`[PDF] getLowestContentY: pageHeight=${pageHeight}, lowestY=${lowestY}, tokens=${tokens.length}`);
 
-        // Pattern: "x y w h re" — rectangle operator
-        const rePattern = /([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+re/g;
-        while ((match = rePattern.exec(allText)) !== null) {
-            const y = parseFloat(match[2]);
-            const h = parseFloat(match[4]);
-            if (!isNaN(y) && !isNaN(h)) {
-                const bottomY = Math.min(y, y + h);
-                if (bottomY >= 0 && bottomY < lowestY) {
-                    lowestY = bottomY;
-                }
-            }
-        }
-
-        // Pattern: "x y m" or "x y l" — moveto / lineto
-        const mlPattern = /([\d.\-]+)\s+([\d.\-]+)\s+[ml]/g;
-        while ((match = mlPattern.exec(allText)) !== null) {
-            const y = parseFloat(match[2]);
-            if (!isNaN(y) && y >= 0 && y < lowestY) {
-                lowestY = y;
-            }
-        }
-
-        // If no Y coordinates found, assume page is full
         if (lowestY >= pageHeight) return 0;
 
         return lowestY;
     } catch (err) {
         console.warn('Could not analyze page content stream:', err);
-        return 0; // Fallback: assume no space → add new page
+        return 0;
     }
 }
 
@@ -261,6 +477,8 @@ export async function stampPdf(options: StampOptions): Promise<StampResult> {
 
     let targetPage: PDFPage;
     let startY: number;
+
+    console.log(`[PDF] stampPdf: lowestContentY=${lowestContentY}, availableSpace=${availableSpace}, signatureBlockHeight=${signatureBlockHeight}`);
 
     if (availableSpace >= signatureBlockHeight) {
         // Enough space on the last page — place signature block here
