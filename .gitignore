@@ -3,6 +3,10 @@
 .env.local
 .env.production
 backend/.env
+frontend/.env
+
+# Tokens
+token.txt
 
 # Dependencies
 node_modules/
