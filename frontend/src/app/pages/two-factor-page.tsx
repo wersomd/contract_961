@@ -76,7 +76,7 @@ export function TwoFactorPage({ onVerify, onBack }: TwoFactorPageProps) {
       if (codeValue === '123456') {
         onVerify?.();
       } else {
-        setError('Неверный код подтверждения');
+        setError('Неверный код');
         setCode(['', '', '', '', '', '']);
         inputRefs.current[0]?.focus();
       }

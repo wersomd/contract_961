@@ -176,7 +176,7 @@ signRouter.post('/:token/send-code', sendCodeLimiter, async (req, res, next) => 
             where: { organizationId: request.organizationId },
         });
 
-        const messageTemplate = settings?.smsCodeTemplate || 'Код подтверждения: {code}';
+        const messageTemplate = settings?.smsCodeTemplate || 'Код: {code}';
         const message = messageTemplate.replace('{code}', code);
 
         // Send SMS (code is sent, NOT logged!)

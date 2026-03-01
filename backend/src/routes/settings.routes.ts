@@ -23,7 +23,7 @@ settingsRouter.get('/', async (req: AuthRequest, res, next) => {
                     provider: 'smsc',
                     senderName: '961kz',
                     linkTemplate: 'Подпишите документ: {link}',
-                    codeTemplate: 'Код подтверждения: {code}',
+                    codeTemplate: 'Код: {code}',
                 },
                 security: {
                     ipWhitelist: false,
@@ -63,7 +63,7 @@ settingsRouter.put('/', requireAdmin, async (req: AuthRequest, res, next) => {
                 smsProvider: sms?.provider || 'smsc',
                 smsSenderName: sms?.senderName || '961kz',
                 smsLinkTemplate: sms?.linkTemplate || 'Подпишите документ: {link}',
-                smsCodeTemplate: sms?.codeTemplate || 'Код подтверждения: {code}',
+                smsCodeTemplate: sms?.codeTemplate || 'Код: {code}',
                 ipWhitelistEnabled: security?.ipWhitelist || false,
                 auditLoggingEnabled: security?.auditLogging ?? true,
                 logRetentionDays: security?.logRetentionDays || 90,

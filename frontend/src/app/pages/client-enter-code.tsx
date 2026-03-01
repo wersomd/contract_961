@@ -163,7 +163,7 @@ export function ClientEnterCodePage({ onSuccess, onBack, token }: ClientEnterCod
           </div>
 
           <div className="mb-6 text-center">
-            <h2 className="text-xl md:text-2xl font-semibold mb-2">Введите код подтверждения</h2>
+            <h2 className="text-xl md:text-2xl font-semibold mb-2">Введите код</h2>
             <p className="text-sm text-muted-foreground">
               Код отправлен в SMS на ваш номер телефона
             </p>

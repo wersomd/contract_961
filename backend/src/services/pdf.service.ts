@@ -475,12 +475,19 @@ export async function stampPdf(options: StampOptions): Promise<StampResult> {
     const lowestContentY = getLowestContentY(lastPage, lastPageHeight);
     const availableSpace = lowestContentY - bottomMargin;
 
+    // Calculate what percentage of the page is occupied by content
+    // Content goes from top (pageHeight) down to lowestContentY
+    const contentHeight = lastPageHeight - lowestContentY;
+    const contentPercent = (contentHeight / lastPageHeight) * 100;
+
     let targetPage: PDFPage;
     let startY: number;
 
-    console.log(`[PDF] stampPdf: lowestContentY=${lowestContentY}, availableSpace=${availableSpace}, signatureBlockHeight=${signatureBlockHeight}`);
+    console.log(`[PDF] stampPdf: lowestContentY=${lowestContentY}, contentPercent=${contentPercent.toFixed(1)}%, availableSpace=${availableSpace}, signatureBlockHeight=${signatureBlockHeight}`);
 
-    if (availableSpace >= signatureBlockHeight) {
+    // If content occupies 70% or less of the page AND there is enough absolute space → same page
+    // If content occupies more than 70% → new page (even if technically there might be pixels left)
+    if (contentPercent <= 70 && availableSpace >= signatureBlockHeight) {
         // Enough space on the last page — place signature block here
         targetPage = lastPage;
         startY = lowestContentY - 15; // 15pt gap below content
