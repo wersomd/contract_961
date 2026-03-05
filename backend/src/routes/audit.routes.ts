@@ -7,7 +7,7 @@ export const auditRouter = Router();
 auditRouter.use(authenticate);
 
 // GET /api/audit-logs
-auditRouter.get('/', async (req: AuthRequest, res, next) => {
+auditRouter.get('/', requireAdmin, async (req: AuthRequest, res, next) => {
     try {
         const { search, action, date, page = '1', limit = '50' } = req.query;
         const pageNum = parseInt(page as string);
@@ -69,7 +69,7 @@ auditRouter.get('/', async (req: AuthRequest, res, next) => {
 });
 
 // GET /api/audit-logs/export - CSV export
-auditRouter.get('/export', async (req: AuthRequest, res, next) => {
+auditRouter.get('/export', requireAdmin, async (req: AuthRequest, res, next) => {
     try {
         const { action, date } = req.query;
 

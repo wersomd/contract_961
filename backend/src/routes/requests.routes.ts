@@ -5,7 +5,7 @@ import path from 'path';
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
-import { authenticate, AuthRequest } from '../middleware/auth.js';
+import { authenticate, AuthRequest, requireAdmin } from '../middleware/auth.js';
 import { prisma } from '../lib/prisma.js';
 import { config } from '../config/index.js';
 import { AppError } from '../middleware/error-handler.js';
@@ -93,6 +93,11 @@ requestsRouter.get('/export', async (req: AuthRequest, res, next) => {
         const { search, status } = req.query;
 
         const where: any = { organizationId: req.user!.organizationId };
+
+        // Managers see only their own requests
+        if (req.user!.role === 'manager') {
+            where.managerId = req.user!.id;
+        }
 
         if (status && status !== 'all') {
             where.status = status;
@@ -187,6 +192,11 @@ requestsRouter.get('/', async (req: AuthRequest, res, next) => {
         const skip = (pageNum - 1) * limitNum;
 
         const where: any = { organizationId: req.user!.organizationId };
+
+        // Managers see only their own requests
+        if (req.user!.role === 'manager') {
+            where.managerId = req.user!.id;
+        }
 
         if (status && status !== 'all') {
             where.status = status;
@@ -361,11 +371,18 @@ requestsRouter.post('/', upload.single('documentFile'), async (req: AuthRequest,
 // GET /api/requests/:id
 requestsRouter.get('/:id', async (req: AuthRequest, res, next) => {
     try {
+        const where: any = {
+            id: req.params.id,
+            organizationId: req.user!.organizationId,
+        };
+
+        // Managers see only their own requests
+        if (req.user!.role === 'manager') {
+            where.managerId = req.user!.id;
+        }
+
         const request = await prisma.request.findFirst({
-            where: {
-                id: req.params.id,
-                organizationId: req.user!.organizationId,
-            },
+            where,
             include: {
                 document: {
                     include: { versions: true },
@@ -544,7 +561,7 @@ requestsRouter.get('/:id/signed-document', async (req: AuthRequest, res, next) =
 });
 
 // DELETE /api/requests/:id - Delete a request
-requestsRouter.delete('/:id', async (req: AuthRequest, res, next) => {
+requestsRouter.delete('/:id', requireAdmin, async (req: AuthRequest, res, next) => {
     try {
         const { id } = req.params;
 

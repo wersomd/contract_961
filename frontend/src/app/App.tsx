@@ -141,6 +141,11 @@ function AppContent() {
   };
 
   const handleNavigate = (page: string) => {
+    // Redirect managers from restricted pages
+    if (user?.role === 'manager' && (page === 'settings' || page === 'audit')) {
+      setCurrentPage('dashboard');
+      return;
+    }
     setCurrentPage(page as Page);
   };
 
@@ -221,6 +226,7 @@ function AppContent() {
         onNavigate={handleNavigate}
         onLogout={handleLogout}
         userName={user.name}
+        userRole={user.role as 'admin' | 'manager'}
       >
         {renderAdminPage()}
       </MainLayout>

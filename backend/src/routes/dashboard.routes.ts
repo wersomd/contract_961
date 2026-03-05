@@ -10,29 +10,35 @@ dashboardRouter.use(authenticate);
 dashboardRouter.get('/stats', async (req: AuthRequest, res, next) => {
     try {
         const orgId = req.user!.organizationId;
+        const baseWhere: any = { organizationId: orgId };
+
+        // Managers see only their own requests
+        if (req.user!.role === 'manager') {
+            baseWhere.managerId = req.user!.id;
+        }
 
         const [pending, signed, expired, drafts, total] = await Promise.all([
             prisma.request.count({
-                where: { organizationId: orgId, status: { in: ['sent', 'viewed', 'code_sent'] } },
+                where: { ...baseWhere, status: { in: ['sent', 'viewed', 'code_sent'] } },
             }),
             prisma.request.count({
-                where: { organizationId: orgId, status: 'signed' },
+                where: { ...baseWhere, status: 'signed' },
             }),
             prisma.request.count({
-                where: { organizationId: orgId, status: 'expired' },
+                where: { ...baseWhere, status: 'expired' },
             }),
             prisma.request.count({
-                where: { organizationId: orgId, status: 'draft' },
+                where: { ...baseWhere, status: 'draft' },
             }),
             prisma.request.count({
-                where: { organizationId: orgId },
+                where: { ...baseWhere },
             }),
         ]);
 
         // Calculate average signing time (simplified)
         const signedRequests = await prisma.request.findMany({
             where: {
-                organizationId: orgId,
+                ...baseWhere,
                 status: 'signed',
                 signedAt: { not: null },
             },
@@ -68,11 +74,18 @@ dashboardRouter.get('/active-requests', async (req: AuthRequest, res, next) => {
     try {
         const limit = parseInt(req.query.limit as string) || 10;
 
+        const activeWhere: any = {
+            organizationId: req.user!.organizationId,
+            status: { in: ['sent', 'viewed', 'code_sent'] },
+        };
+
+        // Managers see only their own requests
+        if (req.user!.role === 'manager') {
+            activeWhere.managerId = req.user!.id;
+        }
+
         const requests = await prisma.request.findMany({
-            where: {
-                organizationId: req.user!.organizationId,
-                status: { in: ['sent', 'viewed', 'code_sent'] },
-            },
+            where: activeWhere,
             orderBy: { createdAt: 'desc' },
             take: limit,
             select: {

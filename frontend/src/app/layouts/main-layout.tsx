@@ -22,6 +22,7 @@ interface MainLayoutProps {
   onNavigate?: (page: string) => void;
   onLogout?: () => void;
   userName?: string;
+  userRole?: 'admin' | 'manager';
 }
 
 interface NavItem {
@@ -46,9 +47,17 @@ export function MainLayout({
   onToggleDarkMode,
   onNavigate,
   onLogout,
-  userName = 'Пользователь'
+  userName = 'Пользователь',
+  userRole = 'manager'
 }: MainLayoutProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // Filter nav items based on role
+  const filteredNavItems = userRole === 'admin'
+    ? navItems
+    : navItems.filter(item => item.href !== '/audit' && item.href !== '/settings');
+
+  const roleLabel = userRole === 'admin' ? 'Администратор' : 'Менеджер';
 
   const handleNavClick = (href: string) => {
     if (onNavigate) {
@@ -83,7 +92,7 @@ export function MainLayout({
 
         {/* Navigation */}
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {navItems.map((item) => {
+          {filteredNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = currentPage === item.href;
 
@@ -118,7 +127,7 @@ export function MainLayout({
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium truncate">{userName}</p>
-              <p className="text-xs text-muted-foreground truncate">admin</p>
+              <p className="text-xs text-muted-foreground truncate">{roleLabel}</p>
             </div>
           </div>
 
@@ -159,7 +168,7 @@ export function MainLayout({
       {mobileMenuOpen && (
         <div className="md:hidden fixed inset-0 top-16 bg-card z-40 overflow-y-auto">
           <nav className="p-4 space-y-1">
-            {navItems.map((item) => {
+            {filteredNavItems.map((item) => {
               const Icon = item.icon;
               const isActive = currentPage === item.href;
 
@@ -188,7 +197,7 @@ export function MainLayout({
               </div>
               <div className="flex-1">
                 <p className="text-sm font-medium">{userName}</p>
-                <p className="text-xs text-muted-foreground">admin</p>
+                <p className="text-xs text-muted-foreground">{roleLabel}</p>
               </div>
             </div>
 

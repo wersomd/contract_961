@@ -114,7 +114,7 @@ settingsRouter.post('/sms/test', requireAdmin, async (req: AuthRequest, res, nex
 });
 
 // GET /api/users
-settingsRouter.get('/users', async (req: AuthRequest, res, next) => {
+settingsRouter.get('/users', requireAdmin, async (req: AuthRequest, res, next) => {
     try {
         const users = await prisma.user.findMany({
             where: { organizationId: req.user!.organizationId },
