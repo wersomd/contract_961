@@ -5,10 +5,7 @@ import 'react-pdf/dist/Page/TextLayer.css';
 import { Button } from '@/app/components/ui/button';
 import { Download, CheckCircle2, Loader2, AlertCircle } from 'lucide-react';
 
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url,
-).toString();
+pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 interface PDFViewerProps {
   documentName: string;
