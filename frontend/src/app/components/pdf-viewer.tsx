@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Button } from '@/app/components/ui/button';
-import { Download, CheckCircle2, Loader2, AlertCircle } from 'lucide-react';
+import { Download, CheckCircle2, Loader2, AlertCircle, ExternalLink } from 'lucide-react';
 
 interface PDFViewerProps {
   documentName: string;
@@ -9,9 +9,14 @@ interface PDFViewerProps {
   url?: string;
 }
 
+function isMobileDevice(): boolean {
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
 export function PDFViewer({ documentName, onDownload, isSigned, url }: PDFViewerProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const mobile = typeof navigator !== 'undefined' && isMobileDevice();
 
   return (
     <div className="flex flex-col h-full bg-muted/30 rounded-lg overflow-hidden border border-border">
@@ -36,39 +41,59 @@ export function PDFViewer({ documentName, onDownload, isSigned, url }: PDFViewer
       {/* PDF Content */}
       <div className="flex-1 relative">
         {url ? (
-          <>
-            {loading && (
-              <div className="absolute inset-0 flex items-center justify-center bg-muted/50 z-10">
-                <div className="flex flex-col items-center gap-2">
-                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                  <span className="text-sm text-muted-foreground">Загрузка документа...</span>
-                </div>
+          mobile ? (
+            // На Android iframe не отображает PDF — открываем через встроенный просмотрщик браузера
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="text-center px-4">
+                <p className="text-sm text-muted-foreground mb-4">
+                  Нажмите, чтобы просмотреть документ
+                </p>
+                <Button
+                  variant="default"
+                  size="lg"
+                  className="gap-2"
+                  onClick={() => window.open(url, '_blank')}
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  Открыть PDF
+                </Button>
               </div>
-            )}
-            {error ? (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="text-center">
-                  <AlertCircle className="w-10 h-10 text-destructive mx-auto mb-3" />
-                  <p className="text-sm text-destructive font-medium">Не удалось загрузить документ</p>
-                  <p className="text-xs text-muted-foreground mt-1">Попробуйте скачать PDF</p>
-                  {onDownload && (
-                    <Button variant="outline" size="sm" className="mt-3 gap-2" onClick={onDownload}>
-                      <Download className="w-4 h-4" />
-                      Скачать
-                    </Button>
-                  )}
+            </div>
+          ) : (
+            <>
+              {loading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-muted/50 z-10">
+                  <div className="flex flex-col items-center gap-2">
+                    <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                    <span className="text-sm text-muted-foreground">Загрузка документа...</span>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <iframe
-                src={url}
-                className="w-full h-full bg-white"
-                title={documentName}
-                onLoad={() => setLoading(false)}
-                onError={() => { setLoading(false); setError(true); }}
-              />
-            )}
-          </>
+              )}
+              {error ? (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="text-center">
+                    <AlertCircle className="w-10 h-10 text-destructive mx-auto mb-3" />
+                    <p className="text-sm text-destructive font-medium">Не удалось загрузить документ</p>
+                    <p className="text-xs text-muted-foreground mt-1">Попробуйте скачать PDF</p>
+                    {onDownload && (
+                      <Button variant="outline" size="sm" className="mt-3 gap-2" onClick={onDownload}>
+                        <Download className="w-4 h-4" />
+                        Скачать
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <iframe
+                  src={url}
+                  className="w-full h-full bg-white"
+                  title={documentName}
+                  onLoad={() => setLoading(false)}
+                  onError={() => { setLoading(false); setError(true); }}
+                />
+              )}
+            </>
+          )
         ) : (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">

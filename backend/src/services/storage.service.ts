@@ -139,6 +139,7 @@ export async function serveFile(
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `${disposition}; filename*=UTF-8''${encodedFilename}`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
 
     if (isS3Path(storagePath)) {
         // Stream from S3 through backend (avoids CORS issues)
@@ -146,7 +147,7 @@ export async function serveFile(
         res.setHeader('Content-Length', buffer.length);
         res.end(buffer);
     } else {
-        // Serve from local disk
-        res.sendFile(storagePath);
+        // Serve from local disk — must be absolute path for Express sendFile
+        res.sendFile(path.resolve(storagePath));
     }
 }
